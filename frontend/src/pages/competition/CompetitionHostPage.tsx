@@ -14,6 +14,7 @@ import {
   type CompetitionStatus,
 } from '@/components/competition/host/HostControlPanel';
 import { competitionApi } from '@/services/competition.api';
+import { ensureValidToken } from '@/services/api';
 import { useAuthStore } from '@/store/authStore';
 import type { QuestionDisplayState, Team } from '@/types/competition';
 
@@ -206,33 +207,48 @@ export function CompetitionHostPage() {
   useEffect(() => {
     fetchData();
 
-    // Create dedicated socket connection for host
-    const { accessToken } = useAuthStore.getState();
-    const socket = io('/competition', {
-      auth: {
-        token: accessToken,
-      },
-      transports: ['websocket', 'polling'],
-    });
-    socketRef.current = socket;
+    // Create dedicated socket connection for host with valid token
+    const initSocket = async () => {
+      try {
+        // Ensure token is valid before connecting
+        const validToken = await ensureValidToken();
 
-    if (id) {
-      socket.on('connect', () => {
-        console.log('Host socket connected');
-        socket.emit('join:host', { competitionId: id });
-      });
+        const socket = io('/competition', {
+          auth: {
+            token: validToken,
+          },
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+        });
+        socketRef.current = socket;
 
-      socket.on('connect_error', (error) => {
-        console.error('Host socket connection error:', error);
-      });
+        if (id) {
+          socket.on('connect', () => {
+            console.log('Host socket connected');
+            socket.emit('join:host', { competitionId: id });
+          });
 
-      socket.on('error', (data: { message: string }) => {
-        console.error('Host socket error:', data.message);
-        // Log current user info for debugging
-        const { user } = useAuthStore.getState();
-        console.log('Current user:', user);
-        setError(data.message);
-      });
+          socket.on('connect_error', async (error) => {
+            console.error('Host socket connection error:', error);
+            // Try to refresh token and reconnect
+            try {
+              const newToken = await ensureValidToken();
+              socket.auth = { token: newToken };
+              socket.connect();
+            } catch {
+              setError('Session expired. Please log in again.');
+            }
+          });
+
+          socket.on('error', (data: { message: string }) => {
+            console.error('Host socket error:', data.message);
+            // Log current user info for debugging
+            const { user } = useAuthStore.getState();
+            console.log('Current user:', user);
+            setError(data.message);
+          });
 
       socket.on('host:joined', (data: {
         competition: Competition;
@@ -380,7 +396,15 @@ export function CompetitionHostPage() {
           competitionApi.getTeams(id).then((teams) => setTeams(teams as unknown as Team[]));
         }
       });
-    }
+        }
+      } catch (err) {
+        console.error('Failed to initialize socket:', err);
+        setError(err instanceof Error ? err.message : 'Failed to connect');
+      }
+    };
+
+    // Call initSocket
+    initSocket();
 
     return () => {
       if (socketRef.current) {

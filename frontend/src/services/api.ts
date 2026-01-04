@@ -163,3 +163,63 @@ export async function del<T>(url: string): Promise<T> {
   }
   return response.data.data as T;
 }
+
+/**
+ * Ensure the current access token is valid.
+ * If expired, attempt to refresh it.
+ * Returns the valid access token or throws if unable to refresh.
+ */
+export async function ensureValidToken(): Promise<string> {
+  const { accessToken, refreshToken, setTokens, logout } = useAuthStore.getState();
+
+  if (!accessToken || !refreshToken) {
+    throw new Error('Not authenticated');
+  }
+
+  // Try to decode and check expiration
+  try {
+    const payload = JSON.parse(atob(accessToken.split('.')[1]));
+    const expiresAt = payload.exp * 1000; // Convert to milliseconds
+    const now = Date.now();
+    const bufferTime = 60 * 1000; // 1 minute buffer
+
+    // If token expires within buffer time, refresh it
+    if (expiresAt - now < bufferTime) {
+      console.log('Token expiring soon, refreshing...');
+      const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+        refreshToken,
+      });
+
+      if (response.data.success) {
+        const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data.data;
+        setTokens(newAccessToken, newRefreshToken);
+        return newAccessToken;
+      } else {
+        logout();
+        throw new Error('Failed to refresh token');
+      }
+    }
+
+    return accessToken;
+  } catch (error) {
+    // If token is malformed, try to refresh anyway
+    if (refreshToken) {
+      try {
+        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+          refreshToken,
+        });
+
+        if (response.data.success) {
+          const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data.data;
+          setTokens(newAccessToken, newRefreshToken);
+          return newAccessToken;
+        }
+      } catch {
+        logout();
+        throw new Error('Session expired. Please log in again.');
+      }
+    }
+    logout();
+    throw new Error('Session expired. Please log in again.');
+  }
+}
