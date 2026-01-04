@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import { io, Socket } from 'socket.io-client';
 import { cn } from '@/lib/utils';
@@ -50,7 +51,7 @@ interface CurrentQuestion {
   _id: string;
   number: number;
   content: string;
-  type: 'choice' | 'blank' | 'answer';
+  type: 'choice' | 'blank' | 'answer' | 'integral';
   options?: Array<{ id: string; label: string; content: string }>;
   correctAnswer?: string;
   explanation?: string;
@@ -73,6 +74,14 @@ interface Team {
   rank?: number;
 }
 
+interface ScoreAdjustment {
+  id: string;
+  targetName: string;
+  adjustment: number;
+  reason?: string;
+  timestamp: Date;
+}
+
 // User role types for the live page
 type UserRole = 'host' | 'referee' | 'display';
 
@@ -87,7 +96,6 @@ export function CompetitionLivePage() {
 
   const [competition, setCompetition] = useState<Competition | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('display');
-  const [showControlPanel, setShowControlPanel] = useState(true);
   const [totalQuestions, setTotalQuestions] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [teamLeaderboard, setTeamLeaderboard] = useState<TeamLeaderboardEntry[]>([]);
@@ -104,10 +112,13 @@ export function CompetitionLivePage() {
   const [teamCount, setTeamCount] = useState(0);
   const [countdownValue, setCountdownValue] = useState(3);
   const [isPaused, setIsPaused] = useState(false);
-  const [showParticipantsPanel, setShowParticipantsPanel] = useState(false);
-  const [selectedParticipant, setSelectedParticipant] = useState<LeaderboardEntry | null>(null);
-  const [bonusPoints, setBonusPoints] = useState('');
-  const [bonusReason, setBonusReason] = useState('');
+
+  // Score adjustment state
+  const [showScorePanel, setShowScorePanel] = useState(false);
+  const [selectedTarget, setSelectedTarget] = useState<{ type: 'participant' | 'team'; id: string; name: string; score: number } | null>(null);
+  const [adjustmentValue, setAdjustmentValue] = useState(0);
+  const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [scoreAdjustments, setScoreAdjustments] = useState<ScoreAdjustment[]>([]);
 
   // Get display settings with fallback
   const displaySettings = useMemo(
@@ -299,7 +310,7 @@ export function CompetitionLivePage() {
             _id: q.id,
             number: i + 1,
             content: q.problem?.content || '',
-            type: (q.problem?.type || 'choice') as 'choice' | 'blank' | 'answer',
+            type: (q.problem?.type || 'choice') as 'choice' | 'blank' | 'answer' | 'integral',
             options: q.problem?.options,
             timeLimit: q.timeLimit,
             points: q.points,
@@ -393,7 +404,7 @@ export function CompetitionLivePage() {
             _id: data.currentQuestion.questionId,
             number: data.currentQuestion.order,
             content: data.currentQuestion.content,
-            type: data.currentQuestion.type as 'choice' | 'blank' | 'answer',
+            type: data.currentQuestion.type as 'choice' | 'blank' | 'answer' | 'integral',
             options: data.currentQuestion.options,
             timeLimit: data.currentQuestion.timeLimit,
             points: data.currentQuestion.points,
@@ -406,7 +417,7 @@ export function CompetitionLivePage() {
             _id: q.id,
             number: i + 1,
             content: q.problem?.content || '',
-            type: (q.problem?.type || 'choice') as 'choice' | 'blank' | 'answer',
+            type: (q.problem?.type || 'choice') as 'choice' | 'blank' | 'answer' | 'integral',
             options: q.problem?.options,
             timeLimit: q.timeLimit,
             points: q.points,
@@ -463,7 +474,7 @@ export function CompetitionLivePage() {
           _id: data.questionId,
           number: data.order,
           content: data.content,
-          type: data.type as 'choice' | 'blank' | 'answer',
+          type: data.type as 'choice' | 'blank' | 'answer' | 'integral',
           options: data.options,
           timeLimit: data.timeLimit,
           points: data.points,
@@ -633,7 +644,7 @@ export function CompetitionLivePage() {
 
   // Host control handlers
   const handleNextQuestion = useCallback(() => {
-    if (socketRef.current && userRole === 'host') {
+    if (socketRef.current && (userRole === 'host')) {
       socketRef.current.emit('question:next', { competitionId: id });
     }
   }, [id, userRole]);
@@ -652,28 +663,10 @@ export function CompetitionLivePage() {
 
   const handleBackToQuestion = useCallback(() => {
     if (socketRef.current && userRole === 'host') {
-      // Emit phase change to go back to question
       socketRef.current.emit('phase:change', { competitionId: id, phase: 'question' });
       setCurrentPhase('question');
     }
   }, [id, userRole]);
-
-  const handleAddBonus = useCallback(() => {
-    if (socketRef.current && selectedParticipant && bonusPoints) {
-      const points = parseInt(bonusPoints);
-      if (!isNaN(points)) {
-        socketRef.current.emit('score:addBonus', {
-          competitionId: id,
-          participantId: selectedParticipant.participantId,
-          bonusPoints: points,
-          reason: bonusReason || undefined,
-        });
-        setBonusPoints('');
-        setBonusReason('');
-        setSelectedParticipant(null);
-      }
-    }
-  }, [id, selectedParticipant, bonusPoints, bonusReason]);
 
   const handlePause = useCallback(() => {
     if (socketRef.current && userRole === 'host') {
@@ -700,12 +693,41 @@ export function CompetitionLivePage() {
     }
   }, [id, userRole]);
 
+  // Score adjustment handler - works for both host and referee
+  const handleScoreAdjust = useCallback(() => {
+    if (!socketRef.current || !selectedTarget || adjustmentValue === 0) return;
+
+    socketRef.current.emit('score:addBonus', {
+      competitionId: id,
+      participantId: selectedTarget.id,
+      bonusPoints: adjustmentValue,
+      reason: adjustmentReason || undefined,
+    });
+
+    // Add to local history
+    setScoreAdjustments(prev => [{
+      id: `adj-${Date.now()}`,
+      targetName: selectedTarget.name,
+      adjustment: adjustmentValue,
+      reason: adjustmentReason,
+      timestamp: new Date(),
+    }, ...prev]);
+
+    // Reset form
+    setSelectedTarget(null);
+    setAdjustmentValue(0);
+    setAdjustmentReason('');
+  }, [id, selectedTarget, adjustmentValue, adjustmentReason]);
+
   // Get the join URL for QR code
   const joinUrl = useMemo(() => {
     if (!competition) return '';
     const baseUrl = window.location.origin;
     return `${baseUrl}/competition/join/${competition.joinCode}`;
   }, [competition]);
+
+  // Check if user is host or referee (can control/adjust)
+  const canControl = userRole === 'host' || userRole === 'referee';
 
   if (isLoading) {
     return (
@@ -729,281 +751,122 @@ export function CompetitionLivePage() {
     );
   }
 
+  // Determine if we should show the three-column layout
+  const showThreeColumnLayout = canControl && currentPhase !== 'setup' && currentPhase !== 'waiting' && currentPhase !== 'team-formation';
+
   return (
-    <div className="min-h-screen" style={{ backgroundColor: colors.background, color: colors.text }}>
+    <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ backgroundColor: colors.background, color: colors.text }}>
       {/* Paused Overlay - Full screen when competition is paused */}
-      {isPaused && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
-          <div className="text-center">
-            <div className="mb-8 flex items-center justify-center gap-6">
-              <svg className="h-24 w-24 animate-pulse text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h1 className="text-6xl font-bold text-yellow-500">
-              {t('competition.paused', '比赛已暂停')}
-            </h1>
-            <p className="mt-6 text-2xl text-yellow-400/80">
-              {t('competition.pausedHint', '请等待主持人继续比赛...')}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Setup Phase - Preparing */}
-      {currentPhase === 'setup' && (
-        <SetupScreen competition={competition} colors={colors} />
-      )}
-
-      {/* Team Formation Phase */}
-      {currentPhase === 'team-formation' && (
-        <TeamFormationScreen
-          competition={competition}
-          teams={teams}
-          participantCount={participantCount}
-          teamCount={teamCount}
-          joinUrl={joinUrl}
-          colors={colors}
-        />
-      )}
-
-      {/* Waiting Screen */}
-      {currentPhase === 'waiting' && (
-        <WaitingScreen
-          competition={competition}
-          participantCount={participantCount}
-          teamCount={teamCount}
-          participantMode={participantMode}
-          joinUrl={joinUrl}
-          colors={colors}
-        />
-      )}
-
-      {/* Countdown Screen */}
-      {currentPhase === 'countdown' && (
-        <CountdownScreen
-          countdownValue={countdownValue}
-          colors={colors}
-        />
-      )}
-
-      {/* Question Display */}
-      {currentPhase === 'question' && (
-        competition?.settings.showLeaderboardDuringQuestion ? (
-          <div className="flex min-h-screen">
-            <div className="flex-1">
-              <QuestionDisplay
-                questions={visibleQuestions}
-                currentQuestion={currentQuestion}
-                timerState={timerState}
-                currentIndex={currentQuestionIndex}
-                totalQuestions={questions.length}
-                progress={progress}
-                displaySettings={displaySettings}
-                colors={colors}
-                formatTime={formatTime}
-              />
-            </div>
-            <div
-              className="w-80 overflow-y-auto border-l p-4"
-              style={{
-                backgroundColor: colors.background,
-                borderColor: colors.secondary + '30'
-              }}
-            >
-              <MiniLeaderboard
-                leaderboard={leaderboard}
-                teamLeaderboard={teamLeaderboard}
-                participantMode={participantMode}
-                colors={colors}
-              />
-            </div>
-          </div>
-        ) : (
-          <QuestionDisplay
-            questions={visibleQuestions}
-            currentQuestion={currentQuestion}
-            timerState={timerState}
-            currentIndex={currentQuestionIndex}
-            totalQuestions={questions.length}
-            progress={progress}
-            displaySettings={displaySettings}
-            colors={colors}
-            formatTime={formatTime}
-          />
-        )
-      )}
-
-      {/* Answer Revealing / Time's Up */}
-      {currentPhase === 'revealing' && (
-        <RevealingScreen
-          question={currentQuestion}
-          colors={colors}
-        />
-      )}
-
-      {/* Leaderboard Display */}
-      {currentPhase === 'leaderboard' && (
-        <LeaderboardDisplay
-          leaderboard={leaderboard}
-          teamLeaderboard={teamLeaderboard}
-          participantMode={participantMode}
-          isEnded={false}
-          colors={colors}
-        />
-      )}
-
-      {/* Finished Screen */}
-      {currentPhase === 'finished' && (
-        <LeaderboardDisplay
-          leaderboard={leaderboard}
-          teamLeaderboard={teamLeaderboard}
-          participantMode={participantMode}
-          isEnded={true}
-          colors={colors}
-        />
-      )}
-
-      {/* QR Code Corner Display (when not in setup/finished) */}
-      {currentPhase !== 'setup' && currentPhase !== 'finished' && currentPhase !== 'waiting' && currentPhase !== 'team-formation' && (
-        <QRCodeCorner joinCode={competition.joinCode} joinUrl={joinUrl} colors={colors} />
-      )}
-
-      {/* Host Control Panel - Floating at bottom */}
-      {userRole === 'host' && showControlPanel && (
-        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2">
-          <div
-            className="flex items-center gap-4 rounded-2xl px-6 py-4 shadow-2xl backdrop-blur-xl"
-            style={{
-              backgroundColor: colors.background + 'ee',
-              border: `1px solid ${colors.secondary}40`,
-            }}
+      <AnimatePresence>
+        {isPaused && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}
           >
-            {/* Question Progress */}
-            <div className="flex items-center gap-2 border-r pr-4" style={{ borderColor: colors.secondary + '40' }}>
-              <span className="text-sm" style={{ color: colors.text + '80' }}>
-                {t('competition.question', '问题')}
-              </span>
-              <span className="font-mono font-bold" style={{ color: colors.primary }}>
-                {currentQuestionIndex + 1} / {totalQuestions || questions.length}
-              </span>
-            </div>
+            <motion.div
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              className="text-center"
+            >
+              <div className="mb-8 flex items-center justify-center">
+                <PauseCircleIcon className="h-32 w-32 animate-pulse text-yellow-500" />
+              </div>
+              <h1 className="text-6xl font-bold text-yellow-500">
+                {t('competition.paused', '比赛已暂停')}
+              </h1>
+              <p className="mt-6 text-2xl text-yellow-400/80">
+                {t('competition.pausedHint', '请等待主持人继续比赛...')}
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-            {/* Timer Display */}
-            <div className="flex items-center gap-2 border-r pr-4" style={{ borderColor: colors.secondary + '40' }}>
-              <IconTimer
-                size={20}
-                state={timerState.isRunning ? 'active' : 'idle'}
-                className={cn(timerState.remainingTime < 10 && timerState.isRunning && 'text-red-500')}
-              />
-              <span
-                className={cn(
-                  'font-mono text-lg font-bold',
-                  timerState.remainingTime < 10 && timerState.isRunning && 'text-red-500'
-                )}
-                style={{ color: timerState.remainingTime >= 10 || !timerState.isRunning ? colors.text : undefined }}
-              >
-                {formatTime(timerState.remainingTime)}
-              </span>
-            </div>
+      {/* Header Bar - Only for host/referee */}
+      {canControl && (
+        <div
+          className="flex shrink-0 items-center justify-between px-6 py-3"
+          style={{ backgroundColor: colors.primary }}
+        >
+          <div className="flex items-center gap-4">
+            <h1 className="text-lg font-bold text-white">{competition.name}</h1>
+            <span className="rounded-full bg-white/20 px-3 py-1 text-sm text-white">
+              {userRole === 'host' ? t('competition.hostMode', '主持人模式') : t('competition.refereeMode', '裁判模式')}
+            </span>
+          </div>
 
-            {/* Timer Adjust Buttons */}
-            <div className="flex items-center gap-1 border-r pr-4" style={{ borderColor: colors.secondary + '40' }}>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleTimerAdjust(-10)}
-                className="h-8 px-2 text-xs"
-              >
-                -10s
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleTimerAdjust(10)}
-                className="h-8 px-2 text-xs"
-              >
-                +10s
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleTimerAdjust(30)}
-                className="h-8 px-2 text-xs"
-              >
-                +30s
-              </Button>
-            </div>
-
-            {/* Main Control Buttons */}
-            <div className="flex items-center gap-2">
-              {/* Pause/Resume */}
-              {isPaused ? (
-                <Button
-                  onClick={handleResume}
-                  size="sm"
-                  className="bg-green-600 hover:bg-green-700"
+          {/* Timer and Controls for Host */}
+          {userRole === 'host' && (
+            <div className="flex items-center gap-4">
+              {/* Timer Display */}
+              <div className="flex items-center gap-2">
+                <IconTimer
+                  size={24}
+                  state={timerState.isRunning ? 'active' : 'idle'}
+                  className={cn('text-white', timerState.remainingTime < 10 && timerState.isRunning && 'text-red-300')}
+                />
+                <span
+                  className={cn(
+                    'font-mono text-2xl font-bold text-white',
+                    timerState.remainingTime < 10 && timerState.isRunning && 'text-red-300'
+                  )}
                 >
+                  {formatTime(timerState.remainingTime)}
+                </span>
+              </div>
+
+              {/* Timer Adjust */}
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="ghost" onClick={() => handleTimerAdjust(-10)} className="text-white hover:bg-white/20">-10s</Button>
+                <Button size="sm" variant="ghost" onClick={() => handleTimerAdjust(10)} className="text-white hover:bg-white/20">+10s</Button>
+                <Button size="sm" variant="ghost" onClick={() => handleTimerAdjust(30)} className="text-white hover:bg-white/20">+30s</Button>
+              </div>
+
+              {/* Divider */}
+              <div className="h-6 w-px bg-white/30" />
+
+              {/* Control Buttons */}
+              {isPaused ? (
+                <Button onClick={handleResume} size="sm" className="bg-green-600 hover:bg-green-700">
                   <PlayIcon className="mr-1 h-4 w-4" />
                   {t('competition.resume', '继续')}
                 </Button>
               ) : (
-                <Button
-                  onClick={handlePause}
-                  size="sm"
-                  variant="outline"
-                  className="border-yellow-500 text-yellow-500 hover:bg-yellow-500/10"
-                >
+                <Button onClick={handlePause} size="sm" variant="outline" className="border-white/50 text-white hover:bg-white/20">
                   <PauseIcon className="mr-1 h-4 w-4" />
                   {t('competition.pause', '暂停')}
                 </Button>
               )}
 
-              {/* Reveal Answer */}
               {currentPhase === 'question' && (
-                <Button
-                  onClick={handleRevealAnswer}
-                  size="sm"
-                  variant="outline"
-                  style={{ borderColor: colors.accent, color: colors.accent }}
-                >
+                <Button onClick={handleRevealAnswer} size="sm" className="bg-white/20 hover:bg-white/30 text-white">
                   <CheckIcon className="mr-1 h-4 w-4" />
                   {t('competition.revealAnswer', '揭晓答案')}
                 </Button>
               )}
 
-              {/* Show Leaderboard - only when not on leaderboard */}
               {currentPhase !== 'leaderboard' && (
-                <Button
-                  onClick={handleShowLeaderboard}
-                  size="sm"
-                  variant="outline"
-                  style={{ borderColor: colors.secondary, color: colors.text }}
-                >
+                <Button onClick={handleShowLeaderboard} size="sm" variant="outline" className="border-white/50 text-white hover:bg-white/20">
                   <IconTrophy size={16} className="mr-1" />
                   {t('competition.showLeaderboard', '排行榜')}
                 </Button>
               )}
 
-              {/* Back to Question - when on leaderboard or revealing */}
               {(currentPhase === 'leaderboard' || currentPhase === 'revealing') && (
-                <Button
-                  onClick={handleBackToQuestion}
-                  size="sm"
-                  variant="outline"
-                  style={{ borderColor: colors.primary, color: colors.primary }}
-                >
+                <Button onClick={handleBackToQuestion} size="sm" variant="outline" className="border-white/50 text-white hover:bg-white/20">
                   <BackIcon className="mr-1 h-4 w-4" />
                   {t('competition.backToQuestion', '返回题目')}
                 </Button>
               )}
 
-              {/* Next Question */}
               <Button
                 onClick={handleNextQuestion}
                 size="sm"
                 disabled={currentQuestionIndex >= (totalQuestions || questions.length) - 1}
-                style={{ backgroundColor: colors.primary }}
+                className="bg-white text-[var(--color-primary)] hover:bg-white/90"
               >
                 {currentQuestionIndex < 0
                   ? t('competition.startFirstQuestion', '开始答题')
@@ -1011,191 +874,533 @@ export function CompetitionLivePage() {
                 <ChevronRightIcon className="ml-1 h-4 w-4" />
               </Button>
 
-              {/* End Competition */}
-              <Button
-                onClick={handleEndCompetition}
-                size="sm"
-                variant="outline"
-                className="border-red-500 text-red-500 hover:bg-red-500/10"
-              >
+              <Button onClick={handleEndCompetition} size="sm" variant="outline" className="border-red-400 text-red-400 hover:bg-red-500/20">
                 {t('competition.end', '结束')}
               </Button>
-
-              {/* Toggle Participants Panel */}
-              <Button
-                onClick={() => setShowParticipantsPanel(!showParticipantsPanel)}
-                size="sm"
-                variant="outline"
-                style={{ borderColor: showParticipantsPanel ? colors.accent : colors.secondary, color: showParticipantsPanel ? colors.accent : colors.text }}
-              >
-                <UsersIcon className="mr-1 h-4 w-4" />
-                {t('competition.participants', '参与者')}
-              </Button>
             </div>
+          )}
 
-            {/* Toggle Panel Button */}
-            <button
-              onClick={() => setShowControlPanel(false)}
-              className="ml-2 rounded-full p-1 opacity-50 transition-opacity hover:opacity-100"
-              style={{ backgroundColor: colors.secondary + '30' }}
-            >
-              <XIcon className="h-4 w-4" style={{ color: colors.text }} />
-            </button>
-          </div>
+          {/* Referee Info */}
+          {userRole === 'referee' && (
+            <div className="flex items-center gap-4 text-white">
+              <span>{t('competition.question', '问题')} {currentQuestionIndex + 1} / {totalQuestions || questions.length}</span>
+              <div className="flex items-center gap-2">
+                <IconTimer size={20} state={timerState.isRunning ? 'active' : 'idle'} />
+                <span className="font-mono font-bold">{formatTime(timerState.remainingTime)}</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Minimized Host Panel Toggle */}
-      {userRole === 'host' && !showControlPanel && (
+      {/* Progress Bar */}
+      {canControl && displaySettings.showProgress && currentPhase !== 'setup' && currentPhase !== 'waiting' && (
+        <div className="h-1 shrink-0" style={{ backgroundColor: colors.secondary + '40' }}>
+          <motion.div
+            className="h-full"
+            style={{ backgroundColor: colors.accent }}
+            initial={{ width: 0 }}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 0.3 }}
+          />
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      <div className="flex min-h-0 flex-1">
+        {/* Left Sidebar - Leaderboard (for host/referee) */}
+        {showThreeColumnLayout && (
+          <div
+            className="w-72 shrink-0 overflow-auto border-r"
+            style={{ borderColor: colors.secondary + '40' }}
+          >
+            <LeaderboardSidebar
+              leaderboard={leaderboard}
+              teamLeaderboard={teamLeaderboard}
+              participantMode={participantMode}
+              colors={colors}
+              onSelectTarget={(target) => {
+                setSelectedTarget(target);
+                setShowScorePanel(true);
+              }}
+              selectedTarget={selectedTarget}
+            />
+          </div>
+        )}
+
+        {/* Center Content - Main Display */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Setup Phase - Preparing */}
+          {currentPhase === 'setup' && (
+            <SetupScreen competition={competition} colors={colors} />
+          )}
+
+          {/* Team Formation Phase */}
+          {currentPhase === 'team-formation' && (
+            <TeamFormationScreen
+              competition={competition}
+              teams={teams}
+              participantCount={participantCount}
+              teamCount={teamCount}
+              joinUrl={joinUrl}
+              colors={colors}
+            />
+          )}
+
+          {/* Waiting Screen */}
+          {currentPhase === 'waiting' && (
+            <WaitingScreen
+              competition={competition}
+              participantCount={participantCount}
+              teamCount={teamCount}
+              participantMode={participantMode}
+              joinUrl={joinUrl}
+              colors={colors}
+            />
+          )}
+
+          {/* Countdown Screen */}
+          {currentPhase === 'countdown' && (
+            <CountdownScreen
+              countdownValue={countdownValue}
+              colors={colors}
+            />
+          )}
+
+          {/* Question Display */}
+          {currentPhase === 'question' && (
+            <QuestionDisplay
+              questions={visibleQuestions}
+              currentQuestion={currentQuestion}
+              timerState={timerState}
+              currentIndex={currentQuestionIndex}
+              totalQuestions={questions.length}
+              progress={progress}
+              displaySettings={displaySettings}
+              colors={colors}
+              formatTime={formatTime}
+              showHeader={!canControl}
+            />
+          )}
+
+          {/* Answer Revealing / Time's Up */}
+          {currentPhase === 'revealing' && (
+            <RevealingScreen
+              question={currentQuestion}
+              colors={colors}
+            />
+          )}
+
+          {/* Leaderboard Display */}
+          {currentPhase === 'leaderboard' && (
+            <LeaderboardDisplay
+              leaderboard={leaderboard}
+              teamLeaderboard={teamLeaderboard}
+              participantMode={participantMode}
+              isEnded={false}
+              colors={colors}
+            />
+          )}
+
+          {/* Finished Screen */}
+          {currentPhase === 'finished' && (
+            <LeaderboardDisplay
+              leaderboard={leaderboard}
+              teamLeaderboard={teamLeaderboard}
+              participantMode={participantMode}
+              isEnded={true}
+              colors={colors}
+            />
+          )}
+        </div>
+
+        {/* Right Sidebar - Score Adjustment Panel (for host/referee) */}
+        <AnimatePresence>
+          {showThreeColumnLayout && showScorePanel && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 320, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              className="shrink-0 overflow-hidden border-l"
+              style={{ borderColor: colors.secondary + '40' }}
+            >
+              <ScoreAdjustmentPanel
+                colors={colors}
+                selectedTarget={selectedTarget}
+                adjustmentValue={adjustmentValue}
+                adjustmentReason={adjustmentReason}
+                scoreAdjustments={scoreAdjustments}
+                onAdjustmentValueChange={setAdjustmentValue}
+                onAdjustmentReasonChange={setAdjustmentReason}
+                onSubmitAdjustment={handleScoreAdjust}
+                onClearSelection={() => setSelectedTarget(null)}
+                onClose={() => setShowScorePanel(false)}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Toggle Score Panel Button (when panel is hidden) */}
+      {showThreeColumnLayout && !showScorePanel && (
         <button
-          onClick={() => setShowControlPanel(true)}
-          className="fixed bottom-4 right-4 z-50 flex h-12 w-12 items-center justify-center rounded-full shadow-lg"
+          onClick={() => setShowScorePanel(true)}
+          className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full px-4 py-2 shadow-lg"
           style={{ backgroundColor: colors.primary }}
         >
-          <SettingsIcon className="h-6 w-6 text-white" />
+          <GavelIcon className="h-5 w-5 text-white" />
+          <span className="text-sm font-medium text-white">{t('competition.adjustScore', '调整分数')}</span>
         </button>
       )}
 
-      {/* Referee Panel - Different functionality */}
-      {userRole === 'referee' && (
-        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2">
-          <div
-            className="flex items-center gap-4 rounded-2xl px-6 py-4 shadow-2xl backdrop-blur-xl"
-            style={{
-              backgroundColor: colors.background + 'ee',
-              border: `1px solid ${colors.secondary}40`,
-            }}
-          >
-            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.primary }}>
-              <GavelIcon className="h-5 w-5" />
-              {t('competition.refereeMode', '裁判模式')}
-            </span>
-            <div className="border-l pl-4" style={{ borderColor: colors.secondary + '40' }}>
-              <span className="text-sm" style={{ color: colors.text + '80' }}>
-                {t('competition.question', '问题')} {currentQuestionIndex + 1} / {totalQuestions || questions.length}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <IconTimer size={20} state={timerState.isRunning ? 'active' : 'idle'} />
-              <span className="font-mono font-bold" style={{ color: colors.text }}>
-                {formatTime(timerState.remainingTime)}
-              </span>
-            </div>
-            <span className="text-xs" style={{ color: colors.text + '60' }}>
-              {t('competition.refereeHint', '使用裁判控制台进行评分调整')}
-            </span>
-          </div>
-        </div>
+      {/* QR Code Corner Display (when not in setup/finished and not in control mode) */}
+      {!canControl && currentPhase !== 'setup' && currentPhase !== 'finished' && currentPhase !== 'waiting' && currentPhase !== 'team-formation' && (
+        <QRCodeCorner joinCode={competition.joinCode} joinUrl={joinUrl} colors={colors} />
       )}
 
-      {/* Role Badge - Shows current role at top right */}
-      {(userRole === 'host' || userRole === 'referee') && (
-        <div
-          className="fixed right-4 top-4 z-50 flex items-center gap-2 rounded-full px-4 py-2"
-          style={{ backgroundColor: userRole === 'host' ? colors.primary + '20' : '#f59e0b20' }}
-        >
-          {userRole === 'host' ? (
-            <>
-              <HostIcon className="h-4 w-4" style={{ color: colors.primary }} />
-              <span className="text-sm font-medium" style={{ color: colors.primary }}>
-                {t('competition.hostMode', '主持人模式')}
-              </span>
-            </>
-          ) : (
-            <>
-              <GavelIcon className="h-4 w-4 text-amber-500" />
-              <span className="text-sm font-medium text-amber-500">
-                {t('competition.refereeMode', '裁判模式')}
-              </span>
-            </>
-          )}
+      {/* Display-only header (when not host/referee) */}
+      {!canControl && (currentPhase === 'question' || currentPhase === 'revealing' || currentPhase === 'leaderboard') && (
+        <div className="fixed left-4 top-4 z-40 flex items-center gap-2 rounded-full px-4 py-2" style={{ backgroundColor: colors.background + 'dd' }}>
+          <span className="font-mono text-sm" style={{ color: colors.text }}>
+            {t('competition.questionOf', 'Question {{current}} of {{total}}', {
+              current: currentQuestionIndex + 1,
+              total: questions.length || totalQuestions,
+            })}
+          </span>
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Participants Panel - Slide-in from right */}
-      {(userRole === 'host' || userRole === 'referee') && showParticipantsPanel && (
-        <div
-          className="fixed right-4 top-20 z-50 max-h-[70vh] w-80 overflow-hidden rounded-2xl shadow-2xl"
-          style={{ backgroundColor: colors.background, border: `1px solid ${colors.secondary}40` }}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.secondary + '40' }}>
-            <h3 className="font-semibold" style={{ color: colors.text }}>
-              {t('competition.participantsList', '参与者列表')}
-            </h3>
-            <button onClick={() => setShowParticipantsPanel(false)} className="rounded p-1 hover:bg-gray-500/20">
-              <XIcon className="h-4 w-4" style={{ color: colors.text }} />
-            </button>
-          </div>
+// Leaderboard Sidebar Component
+function LeaderboardSidebar({
+  leaderboard,
+  teamLeaderboard,
+  participantMode,
+  colors,
+  onSelectTarget,
+  selectedTarget,
+}: {
+  leaderboard: LeaderboardEntry[];
+  teamLeaderboard: TeamLeaderboardEntry[];
+  participantMode: 'individual' | 'team';
+  colors: CustomThemeColors;
+  onSelectTarget: (target: { type: 'participant' | 'team'; id: string; name: string; score: number }) => void;
+  selectedTarget: { type: 'participant' | 'team'; id: string; name: string; score: number } | null;
+}) {
+  const { t } = useTranslation();
 
-          {/* Participant List */}
-          <div className="max-h-[50vh] overflow-y-auto p-2">
-            {leaderboard.length === 0 ? (
-              <p className="p-4 text-center text-sm" style={{ color: colors.text + '60' }}>
-                {t('competition.noParticipantsYet', '暂无参与者')}
-              </p>
-            ) : (
-              leaderboard.map((entry) => (
-                <div
-                  key={entry.participantId}
-                  onClick={() => setSelectedParticipant(selectedParticipant?.participantId === entry.participantId ? null : entry)}
+  return (
+    <div className="flex h-full flex-col p-4">
+      <div className="mb-4 flex items-center gap-2">
+        <IconTrophy size={20} state="active" className="text-yellow-500" />
+        <h3 className="font-semibold" style={{ color: colors.text }}>
+          {participantMode === 'team'
+            ? t('simulation.teamStandings', '队伍排名')
+            : t('simulation.leaderboard', '排行榜')}
+        </h3>
+      </div>
+
+      <p className="mb-3 text-xs" style={{ color: colors.text + '60' }}>
+        {t('competition.clickToAdjustScore', '点击选择要调整分数的参与者')}
+      </p>
+
+      <div className="flex-1 space-y-2 overflow-auto">
+        {participantMode === 'team' && teamLeaderboard.length > 0
+          ? teamLeaderboard.map((entry) => {
+              const isSelected = selectedTarget?.type === 'team' && selectedTarget?.id === entry.team.id;
+              return (
+                <button
+                  key={entry.team.id}
+                  onClick={() => onSelectTarget({
+                    type: 'team',
+                    id: entry.team.id,
+                    name: entry.team.name,
+                    score: entry.team.totalScore,
+                  })}
                   className={cn(
-                    "flex cursor-pointer items-center justify-between rounded-lg p-3 transition-colors",
-                    selectedParticipant?.participantId === entry.participantId ? "bg-[var(--color-primary)]/20" : "hover:bg-gray-500/10"
+                    'flex w-full items-center gap-3 rounded-lg p-3 text-left transition-all',
+                    isSelected && 'ring-2'
                   )}
+                  style={{
+                    backgroundColor: isSelected ? colors.primary + '20' : entry.team.color + '15',
+                    borderLeft: `4px solid ${entry.team.color}`,
+                    // @ts-expect-error CSS custom property
+                    '--tw-ring-color': colors.primary,
+                  }}
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: colors.primary + '30', color: colors.primary }}>
-                      {entry.rank}
-                    </span>
-                    <span className="text-sm font-medium" style={{ color: colors.text }}>
-                      {entry.nickname}
-                    </span>
+                  <span
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold text-white"
+                    style={{ backgroundColor: entry.team.color }}
+                  >
+                    {entry.rank}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium" style={{ color: colors.text }}>
+                      {entry.team.name}
+                    </p>
+                    <p className="text-xs" style={{ color: colors.text + '70' }}>
+                      {entry.team.members?.length || 0} {t('simulation.members', '成员')}
+                    </p>
                   </div>
-                  <span className="font-mono font-bold" style={{ color: colors.accent }}>
+                  <span className="text-lg font-bold" style={{ color: colors.primary }}>
+                    {entry.team.totalScore}
+                  </span>
+                </button>
+              );
+            })
+          : leaderboard.map((entry) => {
+              const isSelected = selectedTarget?.type === 'participant' && selectedTarget?.id === entry.participantId;
+              return (
+                <button
+                  key={entry.participantId}
+                  onClick={() => onSelectTarget({
+                    type: 'participant',
+                    id: entry.participantId,
+                    name: entry.nickname,
+                    score: entry.totalScore,
+                  })}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-lg p-3 text-left transition-all',
+                    isSelected && 'ring-2'
+                  )}
+                  style={{
+                    backgroundColor: isSelected ? colors.primary + '20' : colors.secondary + '20',
+                    // @ts-expect-error CSS custom property
+                    '--tw-ring-color': colors.primary,
+                  }}
+                >
+                  <span
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold"
+                    style={{
+                      backgroundColor:
+                        entry.rank === 1 ? '#fbbf24' : entry.rank === 2 ? '#94a3b8' : entry.rank === 3 ? '#cd7f32' : colors.secondary,
+                      color: entry.rank <= 3 ? 'white' : colors.text,
+                    }}
+                  >
+                    {entry.rank}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium" style={{ color: colors.text }}>
+                      {entry.nickname}
+                    </p>
+                    <p className="text-xs" style={{ color: colors.text + '70' }}>
+                      {entry.correctCount} {t('competition.correct', '正确')}
+                    </p>
+                  </div>
+                  <span className="text-lg font-bold" style={{ color: colors.primary }}>
                     {entry.totalScore}
                   </span>
-                </div>
-              ))
-            )}
-          </div>
+                </button>
+              );
+            })}
 
-          {/* Score Adjustment Panel */}
-          {selectedParticipant && (
-            <div className="border-t p-4" style={{ borderColor: colors.secondary + '40' }}>
-              <p className="mb-2 text-sm font-medium" style={{ color: colors.text }}>
-                {t('competition.adjustScore', '调整分数')}: {selectedParticipant.nickname}
+        {leaderboard.length === 0 && teamLeaderboard.length === 0 && (
+          <div className="py-8 text-center text-sm" style={{ color: colors.text + '60' }}>
+            {t('competition.noParticipantsYet', '暂无参与者')}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Score Adjustment Panel Component
+function ScoreAdjustmentPanel({
+  colors,
+  selectedTarget,
+  adjustmentValue,
+  adjustmentReason,
+  scoreAdjustments,
+  onAdjustmentValueChange,
+  onAdjustmentReasonChange,
+  onSubmitAdjustment,
+  onClearSelection,
+  onClose,
+}: {
+  colors: CustomThemeColors;
+  selectedTarget: { type: 'participant' | 'team'; id: string; name: string; score: number } | null;
+  adjustmentValue: number;
+  adjustmentReason: string;
+  scoreAdjustments: ScoreAdjustment[];
+  onAdjustmentValueChange: (value: number) => void;
+  onAdjustmentReasonChange: (reason: string) => void;
+  onSubmitAdjustment: () => void;
+  onClearSelection: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex h-full flex-col p-4">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 font-semibold" style={{ color: colors.text }}>
+          <GavelIcon className="h-5 w-5" style={{ color: colors.primary }} />
+          {t('simulation.scoreAdjustment', '分数调整')}
+        </h2>
+        <button
+          onClick={onClose}
+          className="rounded p-1 transition-colors hover:bg-gray-500/20"
+        >
+          <XIcon className="h-4 w-4" style={{ color: colors.text }} />
+        </button>
+      </div>
+
+      {/* Score Adjustment Form */}
+      <div
+        className="mb-4 rounded-xl p-4"
+        style={{ backgroundColor: colors.secondary + '20' }}
+      >
+        {selectedTarget ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={{ color: colors.text }}>
+                {t('simulation.target', '目标')}:
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium" style={{ color: colors.primary }}>
+                  {selectedTarget.name}
+                </span>
+                <button
+                  onClick={onClearSelection}
+                  className="rounded p-1 transition-colors"
+                  style={{ backgroundColor: colors.secondary + '30' }}
+                >
+                  <XIcon className="h-3 w-3" style={{ color: colors.text }} />
+                </button>
+              </div>
+            </div>
+
+            <div className="text-center">
+              <p className="text-sm" style={{ color: colors.text + '80' }}>
+                {t('competition.currentScore', '当前分数')}: <span className="font-bold" style={{ color: colors.accent }}>{selectedTarget.score}</span>
               </p>
-              <div className="flex gap-2">
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm" style={{ color: colors.text }}>
+                {t('simulation.adjustment', '调整')}
+              </label>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  onClick={() => onAdjustmentValueChange(adjustmentValue - 10)}
+                  className="flex h-10 w-12 items-center justify-center rounded-lg text-sm font-bold"
+                  style={{ backgroundColor: '#ef444420', color: '#ef4444' }}
+                >
+                  -10
+                </button>
+                <button
+                  onClick={() => onAdjustmentValueChange(adjustmentValue - 1)}
+                  className="flex h-10 w-10 items-center justify-center rounded-lg text-sm font-bold"
+                  style={{ backgroundColor: '#ef444410', color: '#ef4444' }}
+                >
+                  -1
+                </button>
                 <input
                   type="number"
-                  value={bonusPoints}
-                  onChange={(e) => setBonusPoints(e.target.value)}
-                  placeholder={t('competition.bonusPoints', '加减分') as string}
-                  className="flex-1 rounded-lg border px-3 py-2 text-sm"
-                  style={{ backgroundColor: colors.background, borderColor: colors.secondary, color: colors.text }}
+                  value={adjustmentValue}
+                  onChange={(e) => onAdjustmentValueChange(parseInt(e.target.value) || 0)}
+                  className="w-20 rounded-lg border p-2 text-center font-mono text-lg font-bold"
+                  style={{
+                    borderColor: colors.secondary,
+                    backgroundColor: colors.background,
+                    color: adjustmentValue > 0 ? '#22c55e' : adjustmentValue < 0 ? '#ef4444' : colors.text,
+                  }}
                 />
-                <Button
-                  onClick={handleAddBonus}
-                  size="sm"
-                  disabled={!bonusPoints}
-                  style={{ backgroundColor: colors.primary }}
+                <button
+                  onClick={() => onAdjustmentValueChange(adjustmentValue + 1)}
+                  className="flex h-10 w-10 items-center justify-center rounded-lg text-sm font-bold"
+                  style={{ backgroundColor: '#22c55e10', color: '#22c55e' }}
                 >
-                  {t('common.confirm', '确认')}
-                </Button>
+                  +1
+                </button>
+                <button
+                  onClick={() => onAdjustmentValueChange(adjustmentValue + 10)}
+                  className="flex h-10 w-12 items-center justify-center rounded-lg text-sm font-bold"
+                  style={{ backgroundColor: '#22c55e20', color: '#22c55e' }}
+                >
+                  +10
+                </button>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm" style={{ color: colors.text }}>
+                {t('simulation.reason', '原因')} ({t('common.optional', '可选')})
+              </label>
               <input
                 type="text"
-                value={bonusReason}
-                onChange={(e) => setBonusReason(e.target.value)}
-                placeholder={t('competition.reason', '原因(可选)') as string}
-                className="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
-                style={{ backgroundColor: colors.background, borderColor: colors.secondary, color: colors.text }}
+                value={adjustmentReason}
+                onChange={(e) => onAdjustmentReasonChange(e.target.value)}
+                placeholder={t('simulation.reasonPlaceholder', '输入原因...') as string}
+                className="w-full rounded-lg border p-2 text-sm"
+                style={{
+                  borderColor: colors.secondary,
+                  backgroundColor: colors.background,
+                  color: colors.text,
+                }}
               />
             </div>
-          )}
-        </div>
-      )}
+
+            <Button
+              onClick={onSubmitAdjustment}
+              disabled={adjustmentValue === 0}
+              className="w-full"
+              style={{ backgroundColor: colors.primary }}
+            >
+              {adjustmentValue > 0 ? '+' : ''}{adjustmentValue} {t('simulation.applyAdjustment', '应用调整')}
+            </Button>
+          </div>
+        ) : (
+          <p className="py-4 text-center text-sm" style={{ color: colors.text + '60' }}>
+            {t('simulation.selectTarget', '从左侧列表选择要调整分数的参与者')}
+          </p>
+        )}
+      </div>
+
+      {/* Adjustment History */}
+      <div className="flex-1 overflow-auto">
+        <h3 className="mb-2 text-sm font-medium" style={{ color: colors.text }}>
+          {t('simulation.adjustmentHistory', '调整记录')}
+        </h3>
+        {scoreAdjustments.length === 0 ? (
+          <p className="text-sm" style={{ color: colors.text + '60' }}>
+            {t('simulation.noAdjustments', '暂无调整记录')}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {scoreAdjustments.map((adj) => (
+              <div
+                key={adj.id}
+                className="rounded-lg p-3"
+                style={{ backgroundColor: colors.secondary + '30' }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium" style={{ color: colors.text }}>
+                    {adj.targetName}
+                  </span>
+                  <span
+                    className="font-bold"
+                    style={{ color: adj.adjustment > 0 ? '#22c55e' : '#ef4444' }}
+                  >
+                    {adj.adjustment > 0 ? '+' : ''}
+                    {adj.adjustment}
+                  </span>
+                </div>
+                {adj.reason && (
+                  <p className="mt-1 text-xs" style={{ color: colors.text + '70' }}>
+                    {adj.reason}
+                  </p>
+                )}
+                <p className="mt-1 text-xs" style={{ color: colors.text + '50' }}>
+                  {new Date(adj.timestamp).toLocaleTimeString()}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1211,15 +1416,20 @@ function SetupScreen({
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-8">
-      <div className="mb-8 flex items-center gap-4">
-        <IconLoading size={48} state="loading" className="text-[var(--color-primary)]" />
-      </div>
+    <div className="flex flex-1 flex-col items-center justify-center p-8">
+      <motion.div
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        className="mb-8 flex h-32 w-32 items-center justify-center rounded-full"
+        style={{ backgroundColor: colors.primary + '20' }}
+      >
+        <IconLoading size={48} state="loading" />
+      </motion.div>
       <h1 className="mb-4 text-4xl font-bold" style={{ color: colors.text }}>
         {competition.name}
       </h1>
       <p className="text-xl" style={{ color: colors.text + '80' }}>
-        {t('competition.preparingCompetition', 'Preparing competition...')}
+        {t('competition.preparingCompetition', '正在准备比赛...')}
       </p>
     </div>
   );
@@ -1244,28 +1454,28 @@ function TeamFormationScreen({
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-8">
+    <div className="flex flex-1 flex-col items-center justify-center p-8">
       <h1 className="mb-4 text-5xl font-bold" style={{ color: colors.text }}>
         {competition.name}
       </h1>
 
       <div className="mb-8 text-center">
         <p className="mb-4 text-2xl" style={{ color: colors.accent }}>
-          {t('competition.teamFormationPhase', 'Team Formation Phase')}
+          {t('competition.teamFormationPhase', '组队阶段')}
         </p>
         <p className="text-lg" style={{ color: colors.text + '80' }}>
-          {t('competition.formYourTeams', 'Form your teams to get started!')}
+          {t('competition.formYourTeams', '请组建你的团队！')}
         </p>
       </div>
 
       {/* QR Code and Join Code */}
       <div className="mb-8 flex items-center gap-12">
-        <div className="rounded-2xl bg-white p-6">
+        <div className="rounded-2xl bg-white p-6 shadow-lg">
           <QRCodeSVG value={joinUrl} size={200} level="M" />
         </div>
         <div className="text-center">
           <p className="mb-2 text-lg" style={{ color: colors.text + '80' }}>
-            {t('competition.joinWithCode', 'Join with code')}
+            {t('competition.joinWithCode', '使用代码加入')}
           </p>
           <div
             className="rounded-xl px-8 py-4"
@@ -1288,7 +1498,7 @@ function TeamFormationScreen({
             {participantCount}
           </p>
           <p style={{ color: colors.text + '80' }}>
-            {t('competition.participants', 'Participants')}
+            {t('competition.participants', '参与者')}
           </p>
         </div>
         <div>
@@ -1296,7 +1506,7 @@ function TeamFormationScreen({
             {teamCount}
           </p>
           <p style={{ color: colors.text + '80' }}>
-            {t('competition.teams', 'Teams')}
+            {t('competition.teams', '队伍')}
           </p>
         </div>
       </div>
@@ -1305,12 +1515,14 @@ function TeamFormationScreen({
       {teams.length > 0 && (
         <div className="w-full max-w-4xl">
           <h3 className="mb-4 text-xl font-semibold" style={{ color: colors.text }}>
-            {t('competition.formedTeams', 'Formed Teams')}
+            {t('competition.formedTeams', '已组建队伍')}
           </h3>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
             {teams.map((team) => (
-              <div
+              <motion.div
                 key={team.id}
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
                 className="flex items-center gap-3 rounded-xl p-4"
                 style={{ backgroundColor: team.color + '20', borderLeft: `4px solid ${team.color}` }}
               >
@@ -1323,10 +1535,10 @@ function TeamFormationScreen({
                     {team.name}
                   </p>
                   <p className="text-sm" style={{ color: colors.text + '60' }}>
-                    {team.memberCount} {t('competition.members', 'members')}
+                    {team.memberCount} {t('competition.members', '成员')}
                   </p>
                 </div>
-              </div>
+              </motion.div>
             ))}
           </div>
         </div>
@@ -1354,19 +1566,28 @@ function WaitingScreen({
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-8">
-      <h1 className="mb-8 text-5xl font-bold" style={{ color: colors.text }}>
+    <div className="flex flex-1 flex-col items-center justify-center p-8">
+      <motion.h1
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="mb-8 text-5xl font-bold"
+        style={{ color: colors.text }}
+      >
         {competition.name}
-      </h1>
+      </motion.h1>
 
       {/* QR Code */}
-      <div className="mb-8 rounded-3xl bg-white p-8 shadow-2xl">
+      <motion.div
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        className="mb-8 rounded-3xl bg-white p-8 shadow-2xl"
+      >
         <QRCodeSVG value={joinUrl} size={280} level="M" />
-      </div>
+      </motion.div>
 
       <div className="mb-12 text-center">
         <p className="mb-4 text-2xl" style={{ color: colors.text + '80' }}>
-          {t('competition.joinWith', 'Join with code')}
+          {t('competition.joinWith', '使用代码加入')}
         </p>
         <div
           className="rounded-2xl px-12 py-6"
@@ -1385,29 +1606,47 @@ function WaitingScreen({
         {participantMode === 'team' ? (
           <div className="flex gap-12">
             <div>
-              <p className="text-5xl font-bold" style={{ color: colors.accent }}>
+              <motion.p
+                key={participantCount}
+                initial={{ scale: 1.2 }}
+                animate={{ scale: 1 }}
+                className="text-5xl font-bold"
+                style={{ color: colors.accent }}
+              >
                 {participantCount}
-              </p>
+              </motion.p>
               <p className="mt-2 text-xl" style={{ color: colors.text + '80' }}>
-                {t('competition.participantsJoined', 'participants joined')}
+                {t('competition.participantsJoined', '人已加入')}
               </p>
             </div>
             <div>
-              <p className="text-5xl font-bold" style={{ color: colors.primary }}>
+              <motion.p
+                key={teamCount}
+                initial={{ scale: 1.2 }}
+                animate={{ scale: 1 }}
+                className="text-5xl font-bold"
+                style={{ color: colors.primary }}
+              >
                 {teamCount}
-              </p>
+              </motion.p>
               <p className="mt-2 text-xl" style={{ color: colors.text + '80' }}>
-                {t('competition.teamsFormed', 'teams formed')}
+                {t('competition.teamsFormed', '队伍已组建')}
               </p>
             </div>
           </div>
         ) : (
           <p className="text-3xl">
-            <span className="font-bold" style={{ color: colors.accent }}>
+            <motion.span
+              key={participantCount}
+              initial={{ scale: 1.2 }}
+              animate={{ scale: 1 }}
+              className="font-bold"
+              style={{ color: colors.accent }}
+            >
               {participantCount}
-            </span>
+            </motion.span>
             <span className="ml-3" style={{ color: colors.text + '80' }}>
-              {t('competition.participantsJoined', 'participants joined')}
+              {t('competition.participantsJoined', '人已加入')}
             </span>
           </p>
         )}
@@ -1415,10 +1654,12 @@ function WaitingScreen({
 
       <div className="mt-12 flex gap-2">
         {[...Array(3)].map((_, i) => (
-          <div
+          <motion.div
             key={i}
-            className="h-3 w-3 animate-bounce rounded-full"
-            style={{ backgroundColor: colors.accent, animationDelay: `${i * 0.2}s` }}
+            className="h-3 w-3 rounded-full"
+            style={{ backgroundColor: colors.accent }}
+            animate={{ y: [0, -10, 0] }}
+            transition={{ duration: 0.6, delay: i * 0.2, repeat: Infinity }}
           />
         ))}
       </div>
@@ -1437,22 +1678,30 @@ function CountdownScreen({
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center">
-      {countdownValue > 0 ? (
-        <div
-          className="animate-pulse text-[20rem] font-bold leading-none"
-          style={{ color: colors.primary }}
-        >
-          {countdownValue}
-        </div>
-      ) : (
-        <div
-          className="animate-bounce text-8xl font-bold"
-          style={{ color: colors.accent }}
-        >
-          {t('competition.go', 'GO!')}
-        </div>
-      )}
+    <div className="flex flex-1 flex-col items-center justify-center">
+      <AnimatePresence mode="wait">
+        {countdownValue > 0 ? (
+          <motion.div
+            key={countdownValue}
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 1.5, opacity: 0 }}
+            className="text-[20rem] font-bold leading-none"
+            style={{ color: colors.primary }}
+          >
+            {countdownValue}
+          </motion.div>
+        ) : (
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            className="text-8xl font-bold"
+            style={{ color: colors.accent }}
+          >
+            {t('competition.go', 'GO!')}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1468,6 +1717,7 @@ function QuestionDisplay({
   displaySettings,
   colors,
   formatTime,
+  showHeader = true,
 }: {
   questions: CurrentQuestion[];
   currentQuestion: CurrentQuestion | null;
@@ -1478,62 +1728,81 @@ function QuestionDisplay({
   displaySettings: CompetitionDisplaySettings;
   colors: CustomThemeColors;
   formatTime: (ms: number) => string;
+  showHeader?: boolean;
 }) {
   const { t } = useTranslation();
   const isLowTime = timerState.remainingTime < 10 && timerState.isRunning;
 
   return (
-    <div className="flex min-h-screen flex-col">
-      {/* Header with timer and progress */}
-      <div
-        className="flex items-center justify-between px-8 py-4"
-        style={{ backgroundColor: colors.primary }}
-      >
-        <div className="text-white">
-          {displaySettings.showQuestionNumber && (
-            <span className="text-xl font-medium">
-              {t('competition.questionOf', 'Question {{current}} of {{total}}', {
-                current: currentIndex + 1,
-                total: totalQuestions,
-              })}
-            </span>
+    <div className="flex flex-1 flex-col">
+      {/* Header with timer and progress (only for display mode) */}
+      {showHeader && (
+        <div
+          className="flex shrink-0 items-center justify-between px-8 py-4"
+          style={{ backgroundColor: colors.primary }}
+        >
+          <div className="text-white">
+            {displaySettings.showQuestionNumber && (
+              <span className="text-xl font-medium">
+                {t('competition.questionOf', '问题 {{current}} / {{total}}', {
+                  current: currentIndex + 1,
+                  total: totalQuestions,
+                })}
+              </span>
+            )}
+          </div>
+
+          {displaySettings.showTimer && (
+            <div className="flex items-center gap-3">
+              <IconTimer
+                size={32}
+                state={timerState.isRunning ? 'active' : 'idle'}
+                className={cn('text-white', isLowTime && 'text-red-300')}
+              />
+              <motion.div
+                className={cn(
+                  'rounded-full px-6 py-3 text-3xl font-bold text-white',
+                  isLowTime && 'animate-pulse'
+                )}
+                style={{
+                  backgroundColor: isLowTime ? '#ef4444' : colors.accent,
+                }}
+                animate={isLowTime ? { scale: [1, 1.05, 1] } : {}}
+                transition={{ duration: 0.5, repeat: Infinity }}
+              >
+                {formatTime(timerState.remainingTime)}
+              </motion.div>
+            </div>
           )}
         </div>
+      )}
 
-        {displaySettings.showTimer && (
-          <div className="flex items-center gap-3">
-            <IconTimer
-              size={32}
-              state={timerState.isRunning ? 'active' : 'idle'}
-              className={cn('text-white', isLowTime && 'text-red-300')}
-            />
-            <div
-              className={cn(
-                'rounded-full px-6 py-3 text-3xl font-bold text-white',
-                isLowTime && 'animate-pulse'
-              )}
-              style={{
-                backgroundColor: isLowTime ? '#ef4444' : colors.accent,
-              }}
-            >
-              {formatTime(timerState.remainingTime)}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Progress bar (only for display mode) */}
+      {showHeader && displaySettings.showProgress && (
+        <div className="h-2 shrink-0" style={{ backgroundColor: colors.secondary + '40' }}>
+          <motion.div
+            className="h-full"
+            style={{ backgroundColor: colors.accent }}
+            initial={{ width: 0 }}
+            animate={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
 
-      {/* Progress bar */}
-      {displaySettings.showProgress && (
-        <div className="h-2" style={{ backgroundColor: colors.secondary + '40' }}>
-          <div
-            className="h-full transition-all duration-300"
-            style={{ width: `${progress}%`, backgroundColor: colors.accent }}
+      {/* Timer bar for host/referee mode */}
+      {!showHeader && (
+        <div className="h-2 shrink-0" style={{ backgroundColor: colors.secondary + '30' }}>
+          <motion.div
+            className="h-full"
+            style={{ backgroundColor: isLowTime ? '#ef4444' : colors.accent }}
+            animate={{ width: `${(timerState.remainingTime / timerState.totalDuration) * 100}%` }}
+            transition={{ duration: 0.5 }}
           />
         </div>
       )}
 
       {/* Questions content based on layout */}
-      <div className="flex-1 p-8">
+      <div className="flex flex-1 items-center justify-center overflow-auto p-8">
         {displaySettings.layout === 'single' && currentQuestion && (
           <SingleQuestionView question={currentQuestion} colors={colors} displaySettings={displaySettings} />
         )}
@@ -1550,7 +1819,7 @@ function QuestionDisplay({
   );
 }
 
-// Single Question View with LaTeX
+// Single Question View with LaTeX - Improved for different question types
 function SingleQuestionView({
   question,
   colors,
@@ -1560,8 +1829,15 @@ function SingleQuestionView({
   colors: CustomThemeColors;
   displaySettings: CompetitionDisplaySettings;
 }) {
+  const { t } = useTranslation();
+  const optionColors = ['#ef4444', '#3b82f6', '#eab308', '#22c55e'];
+
   return (
-    <div className="flex h-full flex-col items-center justify-center">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex w-full max-w-5xl flex-col items-center"
+    >
       {/* Question number badge */}
       {displaySettings.showQuestionNumber && (
         <div
@@ -1572,40 +1848,76 @@ function SingleQuestionView({
         </div>
       )}
 
+      {/* Question type indicator */}
+      <div className="mb-4 flex items-center gap-2">
+        <span
+          className="rounded-full px-4 py-1 text-sm font-medium"
+          style={{ backgroundColor: colors.accent + '20', color: colors.accent }}
+        >
+          {question.type === 'choice' && t('problem.type.choice', '选择题')}
+          {question.type === 'blank' && t('problem.type.blank', '填空题')}
+          {question.type === 'answer' && t('problem.type.answer', '解答题')}
+          {question.type === 'integral' && t('problem.type.integral', '积分题')}
+        </span>
+        <span className="text-lg font-medium" style={{ color: colors.accent }}>
+          {question.points} {t('competition.points', '分')}
+        </span>
+      </div>
+
       {/* Question content with LaTeX */}
       <LaTeXRenderer
         content={question.content}
-        className="mb-12 max-w-4xl text-center text-4xl leading-relaxed"
+        className="mb-8 max-w-4xl text-center text-3xl leading-relaxed md:text-4xl"
         style={{ color: colors.text }}
       />
 
       {/* Options for choice questions */}
       {question.type === 'choice' && question.options && (
-        <div className="grid w-full max-w-4xl grid-cols-2 gap-6">
+        <div className="grid w-full max-w-4xl gap-4 md:grid-cols-2">
           {question.options.map((option, index) => (
-            <div
+            <motion.div
               key={option.id}
-              className="rounded-xl p-6 text-2xl text-white"
-              style={{
-                backgroundColor:
-                  index === 0 ? '#ef4444' :
-                  index === 1 ? '#3b82f6' :
-                  index === 2 ? '#eab308' :
-                  '#22c55e',
-              }}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.1 }}
+              className="flex items-center gap-4 rounded-xl p-5 text-white"
+              style={{ backgroundColor: optionColors[index % optionColors.length] }}
             >
-              <span className="mr-4 font-bold">{option.label}.</span>
-              <LaTeXRenderer content={option.content} className="inline" />
-            </div>
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/20 text-2xl font-bold">
+                {option.label}
+              </span>
+              <LaTeXRenderer content={option.content} className="text-xl" />
+            </motion.div>
           ))}
         </div>
       )}
 
-      {/* Points display */}
-      <div className="mt-8 text-lg" style={{ color: colors.accent }}>
-        {question.points} pts
-      </div>
-    </div>
+      {/* Hint for fill-in-blank and integral questions */}
+      {(question.type === 'blank' || question.type === 'integral') && (
+        <div
+          className="rounded-xl p-6 text-center"
+          style={{ backgroundColor: colors.secondary + '20' }}
+        >
+          <p className="text-lg" style={{ color: colors.text + '80' }}>
+            {question.type === 'integral'
+              ? t('competition.enterIntegral', '请输入原函数（不含 +C）')
+              : t('competition.enterAnswer', '请输入答案')}
+          </p>
+        </div>
+      )}
+
+      {/* Hint for answer questions */}
+      {question.type === 'answer' && (
+        <div
+          className="rounded-xl p-6 text-center"
+          style={{ backgroundColor: colors.secondary + '20' }}
+        >
+          <p className="text-lg" style={{ color: colors.text + '80' }}>
+            {t('competition.writeAnswer', '请在答题纸上写出完整解答过程')}
+          </p>
+        </div>
+      )}
+    </motion.div>
   );
 }
 
@@ -1623,16 +1935,22 @@ function GridQuestionView({
 
   return (
     <div
-      className="grid h-full gap-6"
+      className="grid w-full gap-6"
       style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}
     >
-      {questions.map((question) => (
-        <QuestionCard
+      {questions.map((question, index) => (
+        <motion.div
           key={question._id}
-          question={question}
-          colors={colors}
-          displaySettings={displaySettings}
-        />
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: index * 0.05 }}
+        >
+          <QuestionCard
+            question={question}
+            colors={colors}
+            displaySettings={displaySettings}
+          />
+        </motion.div>
       ))}
     </div>
   );
@@ -1649,15 +1967,21 @@ function ListQuestionView({
   displaySettings: CompetitionDisplaySettings;
 }) {
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
-      {questions.map((question) => (
-        <QuestionCard
+    <div className="mx-auto w-full max-w-4xl space-y-4">
+      {questions.map((question, index) => (
+        <motion.div
           key={question._id}
-          question={question}
-          colors={colors}
-          displaySettings={displaySettings}
-          horizontal
-        />
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: index * 0.05 }}
+        >
+          <QuestionCard
+            question={question}
+            colors={colors}
+            displaySettings={displaySettings}
+            horizontal
+          />
+        </motion.div>
       ))}
     </div>
   );
@@ -1731,12 +2055,13 @@ function QuestionCard({
             className="rounded px-2 py-1 text-xs"
             style={{ backgroundColor: colors.accent + '20', color: colors.accent }}
           >
-            {question.type === 'choice' && t('problem.type.choice', 'Choice')}
-            {question.type === 'blank' && t('problem.type.blank', 'Fill-in')}
-            {question.type === 'answer' && t('problem.type.answer', 'Answer')}
+            {question.type === 'choice' && t('problem.type.choice', '选择题')}
+            {question.type === 'blank' && t('problem.type.blank', '填空题')}
+            {question.type === 'answer' && t('problem.type.answer', '解答题')}
+            {question.type === 'integral' && t('problem.type.integral', '积分题')}
           </span>
           <span className="text-sm" style={{ color: colors.text + '80' }}>
-            {question.points} pts
+            {question.points} {t('competition.points', '分')}
           </span>
         </div>
       </div>
@@ -1757,20 +2082,24 @@ function RevealingScreen({
   // If no question or no correct answer, show "Time's Up" screen
   if (!question || !question.correctAnswer) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-8">
+      <div className="flex flex-1 flex-col items-center justify-center p-8">
         {/* Time's Up Icon */}
-        <div
+        <motion.div
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
           className="mb-8 flex h-32 w-32 items-center justify-center rounded-full"
           style={{ backgroundColor: colors.accent + '20' }}
         >
-          <svg className="h-16 w-16" style={{ color: colors.accent }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" strokeWidth="2" />
-            <polyline points="12 6 12 12 16 14" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <h2 className="mb-4 text-5xl font-bold" style={{ color: colors.accent }}>
+          <TimerIcon className="h-16 w-16" style={{ color: colors.accent }} />
+        </motion.div>
+        <motion.h2
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="mb-4 text-5xl font-bold"
+          style={{ color: colors.accent }}
+        >
           {t('competition.timeUp', '时间到！')}
-        </h2>
+        </motion.h2>
         <p className="text-2xl" style={{ color: colors.text + '80' }}>
           {t('competition.waitingForReveal', '等待主持人公布答案...')}
         </p>
@@ -1779,39 +2108,53 @@ function RevealingScreen({
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-8">
+    <div className="flex flex-1 flex-col items-center justify-center p-8">
+      <motion.div
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        className="mb-6 flex h-24 w-24 items-center justify-center rounded-full"
+        style={{ backgroundColor: '#22c55e20' }}
+      >
+        <CheckIcon className="h-12 w-12 text-green-500" />
+      </motion.div>
+
       <h2 className="mb-8 text-3xl font-bold" style={{ color: colors.text }}>
-        {t('competition.answerRevealed', 'Answer Revealed')}
+        {t('competition.answerRevealed', '正确答案')}
       </h2>
 
       {/* Question */}
       <div
-        className="mb-8 rounded-2xl p-8"
+        className="mb-8 max-w-3xl rounded-2xl p-8"
         style={{ backgroundColor: colors.secondary + '20' }}
       >
         <LaTeXRenderer
           content={question.content}
-          className="max-w-3xl text-center text-2xl"
+          className="text-center text-2xl"
           style={{ color: colors.text }}
         />
       </div>
 
       {/* Correct Answer */}
-      <div className="text-center">
-        <p className="mb-4 text-xl" style={{ color: colors.text + '80' }}>
-          {t('competition.correctAnswer', 'Correct Answer')}
-        </p>
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ delay: 0.3 }}
+        className="text-center"
+      >
         <div
           className="rounded-xl px-12 py-6"
           style={{ backgroundColor: '#22c55e20' }}
         >
           {question.type === 'choice' && question.options ? (
             <div className="flex items-center gap-4">
-              <span className="text-5xl font-bold text-green-500">
+              <span className="text-6xl font-bold text-green-500">
                 {question.correctAnswer}
               </span>
               <span className="text-2xl" style={{ color: colors.text }}>
-                {question.options.find(o => o.label === question.correctAnswer)?.content}
+                <LaTeXRenderer
+                  content={question.options.find(o => o.label === question.correctAnswer)?.content || ''}
+                  className="inline"
+                />
               </span>
             </div>
           ) : (
@@ -1821,13 +2164,18 @@ function RevealingScreen({
             />
           )}
         </div>
-      </div>
+      </motion.div>
 
       {/* Explanation / Analysis */}
       {question.explanation && (
-        <div className="mt-8 w-full max-w-3xl">
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="mt-8 w-full max-w-3xl"
+        >
           <p className="mb-4 text-xl" style={{ color: colors.text + '80' }}>
-            {t('competition.explanation', 'Explanation')}
+            {t('competition.explanation', '解析')}
           </p>
           <div
             className="rounded-xl p-6"
@@ -1839,105 +2187,8 @@ function RevealingScreen({
               style={{ color: colors.text }}
             />
           </div>
-        </div>
+        </motion.div>
       )}
-    </div>
-  );
-}
-
-// Mini Leaderboard Component (shown during question phase)
-function MiniLeaderboard({
-  leaderboard,
-  teamLeaderboard,
-  participantMode,
-  colors,
-}: {
-  leaderboard: LeaderboardEntry[];
-  teamLeaderboard: TeamLeaderboardEntry[];
-  participantMode: 'individual' | 'team';
-  colors: CustomThemeColors;
-}) {
-  const { t } = useTranslation();
-  const displayData = participantMode === 'team' && teamLeaderboard.length > 0
-    ? teamLeaderboard.slice(0, 10).map(e => ({
-        id: e.team.id,
-        rank: e.rank,
-        name: e.team.name,
-        score: e.team.totalScore,
-        color: e.team.color,
-      }))
-    : leaderboard.slice(0, 10).map(e => ({
-        id: e.participantId,
-        rank: e.rank,
-        name: e.nickname,
-        score: e.totalScore,
-      }));
-
-  return (
-    <div className="h-full">
-      <div className="mb-4 flex items-center gap-2">
-        <IconTrophy size={20} state="active" className="text-yellow-500" />
-        <h3 className="text-sm font-semibold" style={{ color: colors.text }}>
-          {t('competition.liveRanking', 'Live Ranking')}
-        </h3>
-      </div>
-
-      <div className="space-y-2">
-        {displayData.map((entry, index) => (
-          <div
-            key={entry.id}
-            className="flex items-center justify-between rounded-lg px-3 py-2"
-            style={{
-              backgroundColor:
-                index === 0 ? 'rgba(234, 179, 8, 0.15)' :
-                index === 1 ? 'rgba(156, 163, 175, 0.15)' :
-                index === 2 ? 'rgba(249, 115, 22, 0.15)' :
-                colors.secondary + '10',
-              borderLeft: 'color' in entry ? `3px solid ${entry.color}` : undefined,
-            }}
-          >
-            <div className="flex items-center gap-2 overflow-hidden">
-              <span
-                className="w-5 text-sm font-bold"
-                style={{
-                  color:
-                    index === 0 ? '#eab308' :
-                    index === 1 ? '#9ca3af' :
-                    index === 2 ? '#f97316' :
-                    colors.text + '60',
-                }}
-              >
-                {entry.rank}
-              </span>
-              {'color' in entry && (
-                <div
-                  className="h-4 w-4 flex-shrink-0 rounded"
-                  style={{ backgroundColor: entry.color as string }}
-                />
-              )}
-              <span
-                className="truncate text-sm"
-                style={{ color: colors.text }}
-                title={entry.name}
-              >
-                {entry.name}
-              </span>
-            </div>
-            <span
-              className="ml-2 flex-shrink-0 text-sm font-semibold"
-              style={{ color: colors.accent }}
-            >
-              {entry.score}
-            </span>
-          </div>
-        ))}
-
-        {displayData.length === 0 && (
-          <div className="py-4 text-center text-sm" style={{ color: colors.text + '60' }}>
-            {t('competition.noRankingYet', 'No ranking yet')}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -1963,7 +2214,7 @@ function LeaderboardDisplay({
         rank: e.rank,
         name: e.team.name,
         score: e.team.totalScore,
-        subtext: `${e.team.members?.length || 0} ${t('competition.members', 'members')}`,
+        subtext: `${e.team.members?.length || 0} ${t('competition.members', '成员')}`,
         color: e.team.color,
       }))
     : leaderboard.map(e => ({
@@ -1971,28 +2222,34 @@ function LeaderboardDisplay({
         rank: e.rank,
         name: e.nickname,
         score: e.totalScore,
-        subtext: `${e.correctCount} ${t('competition.correct', 'correct')}`,
+        subtext: `${e.correctCount} ${t('competition.correct', '正确')}`,
       }));
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-8">
-      <div className="mb-8 flex items-center gap-4">
+    <div className="flex flex-1 flex-col items-center justify-center p-8">
+      <motion.div
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="mb-8 flex items-center gap-4"
+      >
         <IconTrophy size={48} state="active" className="text-yellow-500" />
         <h2 className="text-4xl font-bold" style={{ color: colors.text }}>
           {isEnded
-            ? t('competition.finalResults', 'Final Results')
-            : t('competition.leaderboard', 'Leaderboard')}
+            ? t('competition.finalResults', '最终结果')
+            : t('competition.leaderboard', '排行榜')}
         </h2>
-      </div>
+      </motion.div>
 
       <div className="w-full max-w-2xl space-y-4">
-        {displayData.map((entry, index) => (
-          <div
+        {displayData.slice(0, 10).map((entry, index) => (
+          <motion.div
             key={entry.id}
+            initial={{ x: -50, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ delay: index * 0.1 }}
             className={cn(
               'flex items-center justify-between rounded-xl p-6 transition-all',
-              index === 0 && 'scale-110',
-              index === 1 && 'scale-105'
+              index === 0 && 'scale-105',
             )}
             style={{
               backgroundColor:
@@ -2005,16 +2262,17 @@ function LeaderboardDisplay({
           >
             <div className="flex items-center gap-6">
               <span
-                className="text-4xl font-bold"
+                className="flex h-12 w-12 items-center justify-center rounded-full text-2xl font-bold"
                 style={{
-                  color:
-                    index === 0 ? '#eab308' :
+                  backgroundColor:
+                    index === 0 ? '#fbbf24' :
                     index === 1 ? '#9ca3af' :
-                    index === 2 ? '#f97316' :
-                    colors.text + '60',
+                    index === 2 ? '#cd7f32' :
+                    colors.secondary,
+                  color: index < 3 ? 'white' : colors.text,
                 }}
               >
-                #{entry.rank}
+                {entry.rank}
               </span>
               {'color' in entry && (
                 <div
@@ -2022,7 +2280,7 @@ function LeaderboardDisplay({
                   style={{ backgroundColor: entry.color as string }}
                 />
               )}
-              <span className="text-2xl" style={{ color: colors.text }}>
+              <span className="text-2xl font-medium" style={{ color: colors.text }}>
                 {entry.name}
               </span>
             </div>
@@ -2034,14 +2292,20 @@ function LeaderboardDisplay({
                 {entry.subtext}
               </div>
             </div>
-          </div>
+          </motion.div>
         ))}
       </div>
 
       {isEnded && (
-        <div className="mt-12 text-2xl" style={{ color: colors.text + '60' }}>
-          {t('competition.thanksForParticipating', 'Thanks for participating!')}
-        </div>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1 }}
+          className="mt-12 text-2xl"
+          style={{ color: colors.text + '60' }}
+        >
+          {t('competition.thanksForParticipating', '感谢参与！')}
+        </motion.div>
       )}
     </div>
   );
@@ -2059,7 +2323,7 @@ function QRCodeCorner({
 }) {
   return (
     <div
-      className="fixed bottom-4 right-4 flex items-center gap-3 rounded-xl p-3"
+      className="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded-xl p-3"
       style={{ backgroundColor: colors.background, boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}
     >
       <div className="rounded-lg bg-white p-2">
@@ -2077,7 +2341,7 @@ function QRCodeCorner({
   );
 }
 
-// Icon Components for Control Panel
+// Icon Components
 type IconProps = { className?: string; style?: React.CSSProperties };
 
 function PlayIcon({ className, style }: IconProps) {
@@ -2093,6 +2357,16 @@ function PauseIcon({ className, style }: IconProps) {
     <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="6" y="4" width="4" height="16" />
       <rect x="14" y="4" width="4" height="16" />
+    </svg>
+  );
+}
+
+function PauseCircleIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="10" y1="15" x2="10" y2="9" />
+      <line x1="14" y1="15" x2="14" y2="9" />
     </svg>
   );
 }
@@ -2122,15 +2396,6 @@ function XIcon({ className, style }: IconProps) {
   );
 }
 
-function SettingsIcon({ className, style }: IconProps) {
-  return (
-    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
-    </svg>
-  );
-}
-
 function GavelIcon({ className, style }: IconProps) {
   return (
     <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2143,16 +2408,6 @@ function GavelIcon({ className, style }: IconProps) {
   );
 }
 
-function HostIcon({ className, style }: IconProps) {
-  return (
-    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2L2 7l10 5 10-5-10-5z" />
-      <path d="M2 17l10 5 10-5" />
-      <path d="M2 12l10 5 10-5" />
-    </svg>
-  );
-}
-
 function BackIcon({ className, style }: IconProps) {
   return (
     <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2161,13 +2416,11 @@ function BackIcon({ className, style }: IconProps) {
   );
 }
 
-function UsersIcon({ className, style }: IconProps) {
+function TimerIcon({ className, style }: IconProps) {
   return (
     <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
     </svg>
   );
 }

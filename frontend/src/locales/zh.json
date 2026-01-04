@@ -777,6 +777,11 @@
     "participantsList": "参与者列表",
     "adjustScore": "调整分数",
     "bonusPoints": "加减分",
+    "clickToAdjustScore": "点击选择要调整分数的参与者",
+    "currentScore": "当前分数",
+    "enterIntegral": "请输入原函数（不含 +C）",
+    "enterAnswer": "请输入答案",
+    "writeAnswer": "请在答题纸上写出完整解答过程",
     "referee": {
       "title": "裁判设置",
       "enable": "启用裁判",

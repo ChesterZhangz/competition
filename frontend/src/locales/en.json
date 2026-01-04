@@ -777,6 +777,11 @@
     "participantsList": "Participants",
     "adjustScore": "Adjust Score",
     "bonusPoints": "Bonus Points",
+    "clickToAdjustScore": "Click to select a participant to adjust their score",
+    "currentScore": "Current Score",
+    "enterIntegral": "Enter the antiderivative (without +C)",
+    "enterAnswer": "Enter your answer",
+    "writeAnswer": "Write your complete solution on the answer sheet",
     "referee": {
       "title": "Referee Settings",
       "enable": "Enable Referees",
