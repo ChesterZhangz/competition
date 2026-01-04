@@ -195,17 +195,16 @@ export function CompetitionLivePage() {
 
     if (!id) return;
 
-    // Create socket connection with authentication for host/referee
+    // Create socket connection with authentication - AUTO-DETECT host role
     const initSocket = async () => {
       let token: string | null = null;
 
-      // Get auth token if user wants to join as host or referee
-      if (requestedRole === 'host' || requestedRole === 'referee') {
-        try {
-          token = await ensureValidToken();
-        } catch {
-          console.log('No valid token, joining as display only');
-        }
+      // Always try to get auth token to auto-detect if user is host
+      try {
+        token = await ensureValidToken();
+        console.log('Got auth token, will try to join as host');
+      } catch {
+        console.log('No valid token, joining as display only');
       }
 
       const socket = io('/competition', {
@@ -217,13 +216,17 @@ export function CompetitionLivePage() {
       });
       socketRef.current = socket;
 
-      // Join based on requested role
+      // Auto-detect: if user is logged in, try to join as host first
       socket.on('connect', () => {
-        console.log('Live page socket connected, role:', requestedRole);
-        if (requestedRole === 'host' && token) {
-          socket.emit('join:host', { competitionId: id });
-        } else if (requestedRole === 'referee' && token) {
-          socket.emit('join:referee', { competitionId: id });
+        console.log('Live page socket connected');
+        if (token) {
+          // If logged in, try joining as host first (backend will verify if user is actually host)
+          if (requestedRole === 'referee') {
+            socket.emit('join:referee', { competitionId: id });
+          } else {
+            // Default: try to join as host if logged in
+            socket.emit('join:host', { competitionId: id });
+          }
         } else {
           socket.emit('join:display', { competitionId: id });
         }
@@ -235,8 +238,9 @@ export function CompetitionLivePage() {
 
       socket.on('error', (data: { message: string }) => {
         console.error('Live page socket error:', data.message);
-        // If host/referee join failed, fall back to display mode
-        if (requestedRole === 'host' || requestedRole === 'referee') {
+        // If join failed (not authorized as host), fall back to display mode
+        if (userRole !== 'display') {
+          console.log('Falling back to display mode');
           setUserRole('display');
           socket.emit('join:display', { competitionId: id });
         }
