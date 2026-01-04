@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { IconLoading } from '@/components/icons/feedback/IconLoading';
 import { IconTrophy } from '@/components/icons/competition/IconTrophy';
 import { QuestionVisibilityPanel } from '@/components/competition/QuestionVisibilityPanel';
+import { LaTeXRenderer } from '@/components/ui/latex-renderer';
 import {
   HostControlPanel,
   type CompetitionPhase,
@@ -818,9 +819,10 @@ export function CompetitionHostPage() {
               </p>
               {currentQuestion && (
                 <div className="mt-2 rounded-lg bg-[var(--color-card)] p-3">
-                  <p className="line-clamp-3 text-sm">
-                    {currentQuestion.content || t('common.loading', 'Loading...')}
-                  </p>
+                  <LaTeXRenderer
+                    content={currentQuestion.content || t('common.loading', 'Loading...')}
+                    className="line-clamp-3 text-sm"
+                  />
                 </div>
               )}
             </GlassCard>
