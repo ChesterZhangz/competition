@@ -310,14 +310,33 @@ export function CompetitionPlayPage() {
       }
     });
 
-    // Question events
+    // Question events - match backend data format
     socket.on('question:show', (data: {
-      questionIndex: number;
-      question: CurrentQuestion;
-      timerState: TimerState
+      questionId: string;
+      order: number;
+      content: string;
+      type: string;
+      options?: Array<{ id: string; label: string; content: string }>;
+      timeLimit: number;
+      points: number;
+      phase: string;
     }) => {
-      setCurrentQuestion(data.question);
-      setTimerState(data.timerState);
+      setCurrentQuestion({
+        _id: data.questionId,
+        number: data.order,
+        content: data.content,
+        type: data.type as 'choice' | 'blank' | 'answer',
+        options: data.options,
+        timeLimit: data.timeLimit,
+        points: data.points,
+      });
+      // Timer will be updated by timer:started event
+      setTimerState(prev => ({
+        ...prev,
+        totalDuration: data.timeLimit,
+        remainingTime: data.timeLimit,
+        isRunning: true,
+      }));
       setSelectedAnswer('');
       setHasAnswered(false);
       setFeedback(null);
