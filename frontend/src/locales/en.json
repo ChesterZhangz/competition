@@ -766,6 +766,9 @@
     "setTimer": "Set",
     "phaseControl": "Phase Control",
     "settingsTitle": "Settings",
+    "hostMode": "Host Mode",
+    "refereeMode": "Referee Mode",
+    "refereeHint": "Use referee console for score adjustments",
     "referee": {
       "title": "Referee Settings",
       "enable": "Enable Referees",

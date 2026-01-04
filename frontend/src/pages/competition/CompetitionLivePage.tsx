@@ -1,14 +1,16 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { QRCodeSVG } from 'qrcode.react';
 import { io, Socket } from 'socket.io-client';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { IconLoading } from '@/components/icons/feedback/IconLoading';
 import { IconTrophy } from '@/components/icons/competition/IconTrophy';
 import { IconTimer } from '@/components/icons/competition/IconTimer';
 import { LaTeXRenderer } from '@/components/ui/latex-renderer';
 import { competitionApi } from '@/services/competition.api';
+import { ensureValidToken } from '@/services/api';
 import {
   type CompetitionDisplaySettings,
   type CustomThemeColors,
@@ -71,12 +73,22 @@ interface Team {
   rank?: number;
 }
 
+// User role types for the live page
+type UserRole = 'host' | 'referee' | 'display';
+
 export function CompetitionLivePage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const socketRef = useRef<Socket | null>(null);
 
+  // Role from URL query param: ?role=host or ?role=referee
+  const requestedRole = searchParams.get('role') as UserRole | null;
+
   const [competition, setCompetition] = useState<Competition | null>(null);
+  const [userRole, setUserRole] = useState<UserRole>('display');
+  const [showControlPanel, setShowControlPanel] = useState(true);
+  const [totalQuestions, setTotalQuestions] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [teamLeaderboard, setTeamLeaderboard] = useState<TeamLeaderboardEntry[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -183,28 +195,131 @@ export function CompetitionLivePage() {
 
     if (!id) return;
 
-    // Create dedicated socket connection for display screen
-    const socket = io('/competition', {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
-    socketRef.current = socket;
+    // Create socket connection with authentication for host/referee
+    const initSocket = async () => {
+      let token: string | null = null;
 
-    // Join as display on connect and reconnect
-    socket.on('connect', () => {
-      console.log('Display socket connected');
-      socket.emit('join:display', { competitionId: id });
-    });
+      // Get auth token if user wants to join as host or referee
+      if (requestedRole === 'host' || requestedRole === 'referee') {
+        try {
+          token = await ensureValidToken();
+        } catch {
+          console.log('No valid token, joining as display only');
+        }
+      }
 
-    socket.on('connect_error', (error) => {
-      console.error('Display socket connection error:', error);
-    });
+      const socket = io('/competition', {
+        auth: token ? { token } : undefined,
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+      });
+      socketRef.current = socket;
 
-    socket.on('error', (data: { message: string }) => {
-      console.error('Display socket error:', data.message);
-    });
+      // Join based on requested role
+      socket.on('connect', () => {
+        console.log('Live page socket connected, role:', requestedRole);
+        if (requestedRole === 'host' && token) {
+          socket.emit('join:host', { competitionId: id });
+        } else if (requestedRole === 'referee' && token) {
+          socket.emit('join:referee', { competitionId: id });
+        } else {
+          socket.emit('join:display', { competitionId: id });
+        }
+      });
+
+      socket.on('connect_error', (error) => {
+        console.error('Live page socket connection error:', error);
+      });
+
+      socket.on('error', (data: { message: string }) => {
+        console.error('Live page socket error:', data.message);
+        // If host/referee join failed, fall back to display mode
+        if (requestedRole === 'host' || requestedRole === 'referee') {
+          setUserRole('display');
+          socket.emit('join:display', { competitionId: id });
+        }
+      });
+
+      // Handle host:joined - set role and get full competition data
+      socket.on('host:joined', (data: {
+        competition: {
+          currentPhase: CompetitionPhase;
+          currentQuestionIndex: number;
+          questionCount: number;
+          status: string;
+          timerState?: {
+            remainingTime: number;
+            isRunning: boolean;
+            totalDuration?: number;
+          };
+        };
+        questions: Array<{
+          id: string;
+          order: number;
+          status: string;
+          points: number;
+          timeLimit: number;
+          problem?: {
+            id: string;
+            content: string;
+            type: string;
+            options?: Array<{ id: string; label: string; content: string }>;
+          };
+        }>;
+      }) => {
+        console.log('Joined as host');
+        setUserRole('host');
+        setCurrentPhase(data.competition.currentPhase);
+        setCurrentQuestionIndex(data.competition.currentQuestionIndex);
+        setTotalQuestions(data.competition.questionCount);
+        setIsPaused(data.competition.status === 'paused');
+
+        if (data.competition.timerState) {
+          const ts = data.competition.timerState;
+          setTimerState({
+            remainingTime: Math.ceil((ts.remainingTime || 0) / 1000),
+            isRunning: ts.isRunning || false,
+            totalDuration: Math.ceil((ts.totalDuration || 60000) / 1000),
+          });
+        }
+
+        // Set questions and find current question
+        if (data.questions && data.questions.length > 0) {
+          const convertedQuestions = data.questions.map((q, i) => ({
+            _id: q.id,
+            number: i + 1,
+            content: q.problem?.content || '',
+            type: (q.problem?.type || 'choice') as 'choice' | 'blank' | 'answer',
+            options: q.problem?.options,
+            timeLimit: q.timeLimit,
+            points: q.points,
+          }));
+          setQuestions(convertedQuestions);
+
+          // Set current question if in question phase
+          if (data.competition.currentQuestionIndex >= 0) {
+            const cq = convertedQuestions.find(q => q.number === data.competition.currentQuestionIndex + 1);
+            if (cq) setCurrentQuestion(cq);
+          }
+        }
+      });
+
+      // Handle referee:joined
+      socket.on('referee:joined', (data: {
+        competition: {
+          currentPhase: CompetitionPhase;
+          currentQuestionIndex: number;
+          questionCount: number;
+        };
+      }) => {
+        console.log('Joined as referee');
+        setUserRole('referee');
+        setCurrentPhase(data.competition.currentPhase);
+        setCurrentQuestionIndex(data.competition.currentQuestionIndex);
+        setTotalQuestions(data.competition.questionCount);
+      });
 
     // Handle display:joined response - get current state including question
     socket.on('display:joined', (data: {
@@ -461,6 +576,9 @@ export function CompetitionLivePage() {
       socket.on('questions:reorder', (data: { visibilityStates: QuestionDisplayState[] }) => {
         setVisibilityStates(data.visibilityStates);
       });
+    };
+
+    initSocket();
 
     return () => {
       if (socketRef.current) {
@@ -468,7 +586,7 @@ export function CompetitionLivePage() {
         socketRef.current = null;
       }
     };
-  }, [id, fetchData]);
+  }, [id, fetchData, requestedRole]);
 
   // Countdown timer for countdown phase
   useEffect(() => {
@@ -491,6 +609,49 @@ export function CompetitionLivePage() {
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // Host control handlers
+  const handleNextQuestion = useCallback(() => {
+    if (socketRef.current && userRole === 'host') {
+      socketRef.current.emit('question:next', { competitionId: id });
+    }
+  }, [id, userRole]);
+
+  const handleRevealAnswer = useCallback(() => {
+    if (socketRef.current && userRole === 'host') {
+      socketRef.current.emit('answer:reveal', { competitionId: id });
+    }
+  }, [id, userRole]);
+
+  const handleShowLeaderboard = useCallback(() => {
+    if (socketRef.current && userRole === 'host') {
+      socketRef.current.emit('leaderboard:toggle', { competitionId: id, visible: true });
+    }
+  }, [id, userRole]);
+
+  const handlePause = useCallback(() => {
+    if (socketRef.current && userRole === 'host') {
+      socketRef.current.emit('competition:pause', { competitionId: id });
+    }
+  }, [id, userRole]);
+
+  const handleResume = useCallback(() => {
+    if (socketRef.current && userRole === 'host') {
+      socketRef.current.emit('competition:resume', { competitionId: id });
+    }
+  }, [id, userRole]);
+
+  const handleTimerAdjust = useCallback((seconds: number) => {
+    if (socketRef.current && userRole === 'host') {
+      socketRef.current.emit('timer:adjust', { competitionId: id, seconds: seconds * 1000 });
+    }
+  }, [id, userRole]);
+
+  const handleEndCompetition = useCallback(() => {
+    if (socketRef.current && userRole === 'host') {
+      socketRef.current.emit('competition:end', { competitionId: id });
+    }
+  }, [id, userRole]);
 
   // Get the join URL for QR code
   const joinUrl = useMemo(() => {
@@ -659,6 +820,223 @@ export function CompetitionLivePage() {
       {/* QR Code Corner Display (when not in setup/finished) */}
       {currentPhase !== 'setup' && currentPhase !== 'finished' && currentPhase !== 'waiting' && currentPhase !== 'team-formation' && (
         <QRCodeCorner joinCode={competition.joinCode} joinUrl={joinUrl} colors={colors} />
+      )}
+
+      {/* Host Control Panel - Floating at bottom */}
+      {userRole === 'host' && showControlPanel && (
+        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2">
+          <div
+            className="flex items-center gap-4 rounded-2xl px-6 py-4 shadow-2xl backdrop-blur-xl"
+            style={{
+              backgroundColor: colors.background + 'ee',
+              border: `1px solid ${colors.secondary}40`,
+            }}
+          >
+            {/* Question Progress */}
+            <div className="flex items-center gap-2 border-r pr-4" style={{ borderColor: colors.secondary + '40' }}>
+              <span className="text-sm" style={{ color: colors.text + '80' }}>
+                {t('competition.question', '问题')}
+              </span>
+              <span className="font-mono font-bold" style={{ color: colors.primary }}>
+                {currentQuestionIndex + 1} / {totalQuestions || questions.length}
+              </span>
+            </div>
+
+            {/* Timer Display */}
+            <div className="flex items-center gap-2 border-r pr-4" style={{ borderColor: colors.secondary + '40' }}>
+              <IconTimer
+                size={20}
+                state={timerState.isRunning ? 'active' : 'idle'}
+                className={cn(timerState.remainingTime < 10 && timerState.isRunning && 'text-red-500')}
+              />
+              <span
+                className={cn(
+                  'font-mono text-lg font-bold',
+                  timerState.remainingTime < 10 && timerState.isRunning && 'text-red-500'
+                )}
+                style={{ color: timerState.remainingTime >= 10 || !timerState.isRunning ? colors.text : undefined }}
+              >
+                {formatTime(timerState.remainingTime)}
+              </span>
+            </div>
+
+            {/* Timer Adjust Buttons */}
+            <div className="flex items-center gap-1 border-r pr-4" style={{ borderColor: colors.secondary + '40' }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleTimerAdjust(-10)}
+                className="h-8 px-2 text-xs"
+              >
+                -10s
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleTimerAdjust(10)}
+                className="h-8 px-2 text-xs"
+              >
+                +10s
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleTimerAdjust(30)}
+                className="h-8 px-2 text-xs"
+              >
+                +30s
+              </Button>
+            </div>
+
+            {/* Main Control Buttons */}
+            <div className="flex items-center gap-2">
+              {/* Pause/Resume */}
+              {isPaused ? (
+                <Button
+                  onClick={handleResume}
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  <PlayIcon className="mr-1 h-4 w-4" />
+                  {t('competition.resume', '继续')}
+                </Button>
+              ) : (
+                <Button
+                  onClick={handlePause}
+                  size="sm"
+                  variant="outline"
+                  className="border-yellow-500 text-yellow-500 hover:bg-yellow-500/10"
+                >
+                  <PauseIcon className="mr-1 h-4 w-4" />
+                  {t('competition.pause', '暂停')}
+                </Button>
+              )}
+
+              {/* Reveal Answer */}
+              {currentPhase === 'question' && (
+                <Button
+                  onClick={handleRevealAnswer}
+                  size="sm"
+                  variant="outline"
+                  style={{ borderColor: colors.accent, color: colors.accent }}
+                >
+                  <CheckIcon className="mr-1 h-4 w-4" />
+                  {t('competition.revealAnswer', '揭晓答案')}
+                </Button>
+              )}
+
+              {/* Show Leaderboard */}
+              <Button
+                onClick={handleShowLeaderboard}
+                size="sm"
+                variant="outline"
+                style={{ borderColor: colors.secondary, color: colors.text }}
+              >
+                <IconTrophy size={16} className="mr-1" />
+                {t('competition.showLeaderboard', '排行榜')}
+              </Button>
+
+              {/* Next Question */}
+              <Button
+                onClick={handleNextQuestion}
+                size="sm"
+                disabled={currentQuestionIndex >= (totalQuestions || questions.length) - 1}
+                style={{ backgroundColor: colors.primary }}
+              >
+                {currentQuestionIndex < 0
+                  ? t('competition.startFirstQuestion', '开始答题')
+                  : t('competition.nextQuestion', '下一题')}
+                <ChevronRightIcon className="ml-1 h-4 w-4" />
+              </Button>
+
+              {/* End Competition */}
+              <Button
+                onClick={handleEndCompetition}
+                size="sm"
+                variant="outline"
+                className="border-red-500 text-red-500 hover:bg-red-500/10"
+              >
+                {t('competition.end', '结束')}
+              </Button>
+            </div>
+
+            {/* Toggle Panel Button */}
+            <button
+              onClick={() => setShowControlPanel(false)}
+              className="ml-2 rounded-full p-1 opacity-50 transition-opacity hover:opacity-100"
+              style={{ backgroundColor: colors.secondary + '30' }}
+            >
+              <XIcon className="h-4 w-4" style={{ color: colors.text }} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Minimized Host Panel Toggle */}
+      {userRole === 'host' && !showControlPanel && (
+        <button
+          onClick={() => setShowControlPanel(true)}
+          className="fixed bottom-4 right-4 z-50 flex h-12 w-12 items-center justify-center rounded-full shadow-lg"
+          style={{ backgroundColor: colors.primary }}
+        >
+          <SettingsIcon className="h-6 w-6 text-white" />
+        </button>
+      )}
+
+      {/* Referee Panel - Different functionality */}
+      {userRole === 'referee' && (
+        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2">
+          <div
+            className="flex items-center gap-4 rounded-2xl px-6 py-4 shadow-2xl backdrop-blur-xl"
+            style={{
+              backgroundColor: colors.background + 'ee',
+              border: `1px solid ${colors.secondary}40`,
+            }}
+          >
+            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.primary }}>
+              <GavelIcon className="h-5 w-5" />
+              {t('competition.refereeMode', '裁判模式')}
+            </span>
+            <div className="border-l pl-4" style={{ borderColor: colors.secondary + '40' }}>
+              <span className="text-sm" style={{ color: colors.text + '80' }}>
+                {t('competition.question', '问题')} {currentQuestionIndex + 1} / {totalQuestions || questions.length}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <IconTimer size={20} state={timerState.isRunning ? 'active' : 'idle'} />
+              <span className="font-mono font-bold" style={{ color: colors.text }}>
+                {formatTime(timerState.remainingTime)}
+              </span>
+            </div>
+            <span className="text-xs" style={{ color: colors.text + '60' }}>
+              {t('competition.refereeHint', '使用裁判控制台进行评分调整')}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Role Badge - Shows current role at top right */}
+      {(userRole === 'host' || userRole === 'referee') && (
+        <div
+          className="fixed right-4 top-4 z-50 flex items-center gap-2 rounded-full px-4 py-2"
+          style={{ backgroundColor: userRole === 'host' ? colors.primary + '20' : '#f59e0b20' }}
+        >
+          {userRole === 'host' ? (
+            <>
+              <HostIcon className="h-4 w-4" style={{ color: colors.primary }} />
+              <span className="text-sm font-medium" style={{ color: colors.primary }}>
+                {t('competition.hostMode', '主持人模式')}
+              </span>
+            </>
+          ) : (
+            <>
+              <GavelIcon className="h-4 w-4 text-amber-500" />
+              <span className="text-sm font-medium text-amber-500">
+                {t('competition.refereeMode', '裁判模式')}
+              </span>
+            </>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1514,5 +1892,81 @@ function QRCodeCorner({
         </p>
       </div>
     </div>
+  );
+}
+
+// Icon Components for Control Panel
+type IconProps = { className?: string; style?: React.CSSProperties };
+
+function PlayIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="5 3 19 12 5 21 5 3" />
+    </svg>
+  );
+}
+
+function PauseIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="6" y="4" width="4" height="16" />
+      <rect x="14" y="4" width="4" height="16" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
+function XIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+    </svg>
+  );
+}
+
+function GavelIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.5 9.5L9.5 14.5" />
+      <path d="M3 21l4-4" />
+      <path d="M6.5 6.5l11 11" />
+      <path d="M17.5 6.5l-11 11" />
+      <path d="M21 3l-4 4" />
+    </svg>
+  );
+}
+
+function HostIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2L2 7l10 5 10-5-10-5z" />
+      <path d="M2 17l10 5 10-5" />
+      <path d="M2 12l10 5 10-5" />
+    </svg>
   );
 }

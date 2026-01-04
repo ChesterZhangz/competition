@@ -766,6 +766,9 @@
     "setTimer": "设置",
     "phaseControl": "阶段控制",
     "settingsTitle": "设置",
+    "hostMode": "主持人模式",
+    "refereeMode": "裁判模式",
+    "refereeHint": "使用裁判控制台进行评分调整",
     "referee": {
       "title": "裁判设置",
       "enable": "启用裁判",
