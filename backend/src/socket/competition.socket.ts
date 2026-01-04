@@ -1,4 +1,5 @@
 import { Server, Socket } from 'socket.io';
+import { z } from 'zod';
 import { competitionService } from '../services/competition.service';
 import { timerService } from '../services/timer.service';
 import { teamService } from '../services/team.service';
@@ -1549,6 +1550,165 @@ export function setupCompetitionSocket(io: Server): void {
             });
           }
         }
+      } catch (error) {
+        socket.emit('error', { message: (error as Error).message });
+      }
+    });
+
+    // ===== REFEREE ACTIONS =====
+
+    // Referee: Override participant score
+    socket.on('score:override', async (data: unknown) => {
+      try {
+        const validation = validateSocketData(z.object({
+          competitionId: z.string(),
+          participantId: z.string(),
+          newScore: z.number(),
+          reason: z.string().optional(),
+        }), data, 'score:override');
+        if (!validation.success) {
+          socket.emit('error', { message: validation.error });
+          return;
+        }
+        const { competitionId, participantId, newScore, reason } = validation.data;
+
+        // Check if user is host or referee
+        if (!socket.userId) {
+          socket.emit('error', { message: 'Not authenticated' });
+          return;
+        }
+
+        const competition = await competitionService.getById(competitionId);
+        if (!competition) {
+          socket.emit('error', { message: 'Competition not found' });
+          return;
+        }
+
+        const isHost = competition.hostId.toString() === socket.userId;
+        const isReferee = await competitionService.isReferee(competitionId, socket.userId);
+
+        if (!isHost && !isReferee) {
+          socket.emit('error', { message: 'Not authorized' });
+          return;
+        }
+
+        // If referee, check permission
+        if (isReferee && !isHost) {
+          const hasPermission = await competitionService.hasRefereePermission(competitionId, socket.userId, 'override_score');
+          if (!hasPermission) {
+            socket.emit('error', { message: 'No permission to override scores' });
+            return;
+          }
+        }
+
+        // Get participant and update score
+        const participant = await CompetitionParticipant.findById(participantId);
+        if (!participant || participant.competitionId.toString() !== competitionId) {
+          socket.emit('error', { message: 'Participant not found' });
+          return;
+        }
+
+        const oldScore = participant.totalScore;
+        participant.totalScore = newScore;
+        await participant.save();
+
+        // Broadcast score update
+        const rooms = getRooms(competitionId);
+        competitionNamespace.to(rooms.all).emit('score:updated', {
+          participantId,
+          oldScore,
+          newScore,
+          updatedBy: socket.userId,
+          reason,
+        });
+
+        // Update leaderboard
+        const leaderboard = await competitionService.getLeaderboard(competitionId);
+        competitionNamespace.to(rooms.all).emit('leaderboard:update', {
+          individual: leaderboard.map((p, i) => ({
+            rank: i + 1,
+            participantId: p._id,
+            nickname: p.nickname,
+            totalScore: p.totalScore,
+            correctCount: p.correctCount,
+          })),
+        });
+
+        socket.emit('score:override:success', { participantId, newScore });
+      } catch (error) {
+        socket.emit('error', { message: (error as Error).message });
+      }
+    });
+
+    // Referee: Add bonus points to participant
+    socket.on('score:addBonus', async (data: unknown) => {
+      try {
+        const validation = validateSocketData(z.object({
+          competitionId: z.string(),
+          participantId: z.string(),
+          bonusPoints: z.number(),
+          reason: z.string().optional(),
+        }), data, 'score:addBonus');
+        if (!validation.success) {
+          socket.emit('error', { message: validation.error });
+          return;
+        }
+        const { competitionId, participantId, bonusPoints, reason } = validation.data;
+
+        if (!socket.userId) {
+          socket.emit('error', { message: 'Not authenticated' });
+          return;
+        }
+
+        const competition = await competitionService.getById(competitionId);
+        if (!competition) {
+          socket.emit('error', { message: 'Competition not found' });
+          return;
+        }
+
+        const isHost = competition.hostId.toString() === socket.userId;
+        const isReferee = await competitionService.isReferee(competitionId, socket.userId);
+
+        if (!isHost && !isReferee) {
+          socket.emit('error', { message: 'Not authorized' });
+          return;
+        }
+
+        // Get participant and add bonus
+        const participant = await CompetitionParticipant.findById(participantId);
+        if (!participant || participant.competitionId.toString() !== competitionId) {
+          socket.emit('error', { message: 'Participant not found' });
+          return;
+        }
+
+        const oldScore = participant.totalScore;
+        participant.totalScore += bonusPoints;
+        await participant.save();
+
+        // Broadcast score update
+        const rooms = getRooms(competitionId);
+        competitionNamespace.to(rooms.all).emit('score:updated', {
+          participantId,
+          oldScore,
+          newScore: participant.totalScore,
+          bonusPoints,
+          updatedBy: socket.userId,
+          reason,
+        });
+
+        // Update leaderboard
+        const leaderboard = await competitionService.getLeaderboard(competitionId);
+        competitionNamespace.to(rooms.all).emit('leaderboard:update', {
+          individual: leaderboard.map((p, i) => ({
+            rank: i + 1,
+            participantId: p._id,
+            nickname: p.nickname,
+            totalScore: p.totalScore,
+            correctCount: p.correctCount,
+          })),
+        });
+
+        socket.emit('score:addBonus:success', { participantId, newScore: participant.totalScore, bonusPoints });
       } catch (error) {
         socket.emit('error', { message: (error as Error).message });
       }

@@ -774,6 +774,9 @@
     "answerRevealed": "答案公布",
     "correctAnswer": "正确答案",
     "backToQuestion": "返回题目",
+    "participantsList": "参与者列表",
+    "adjustScore": "调整分数",
+    "bonusPoints": "加减分",
     "referee": {
       "title": "裁判设置",
       "enable": "启用裁判",

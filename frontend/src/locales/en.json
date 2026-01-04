@@ -774,6 +774,9 @@
     "answerRevealed": "Answer Revealed",
     "correctAnswer": "Correct Answer",
     "backToQuestion": "Back to Question",
+    "participantsList": "Participants",
+    "adjustScore": "Adjust Score",
+    "bonusPoints": "Bonus Points",
     "referee": {
       "title": "Referee Settings",
       "enable": "Enable Referees",

@@ -104,6 +104,10 @@ export function CompetitionLivePage() {
   const [teamCount, setTeamCount] = useState(0);
   const [countdownValue, setCountdownValue] = useState(3);
   const [isPaused, setIsPaused] = useState(false);
+  const [showParticipantsPanel, setShowParticipantsPanel] = useState(false);
+  const [selectedParticipant, setSelectedParticipant] = useState<LeaderboardEntry | null>(null);
+  const [bonusPoints, setBonusPoints] = useState('');
+  const [bonusReason, setBonusReason] = useState('');
 
   // Get display settings with fallback
   const displaySettings = useMemo(
@@ -654,6 +658,23 @@ export function CompetitionLivePage() {
     }
   }, [id, userRole]);
 
+  const handleAddBonus = useCallback(() => {
+    if (socketRef.current && selectedParticipant && bonusPoints) {
+      const points = parseInt(bonusPoints);
+      if (!isNaN(points)) {
+        socketRef.current.emit('score:addBonus', {
+          competitionId: id,
+          participantId: selectedParticipant.participantId,
+          bonusPoints: points,
+          reason: bonusReason || undefined,
+        });
+        setBonusPoints('');
+        setBonusReason('');
+        setSelectedParticipant(null);
+      }
+    }
+  }, [id, selectedParticipant, bonusPoints, bonusReason]);
+
   const handlePause = useCallback(() => {
     if (socketRef.current && userRole === 'host') {
       socketRef.current.emit('competition:pause', { competitionId: id });
@@ -999,6 +1020,17 @@ export function CompetitionLivePage() {
               >
                 {t('competition.end', '结束')}
               </Button>
+
+              {/* Toggle Participants Panel */}
+              <Button
+                onClick={() => setShowParticipantsPanel(!showParticipantsPanel)}
+                size="sm"
+                variant="outline"
+                style={{ borderColor: showParticipantsPanel ? colors.accent : colors.secondary, color: showParticipantsPanel ? colors.accent : colors.text }}
+              >
+                <UsersIcon className="mr-1 h-4 w-4" />
+                {t('competition.participants', '参与者')}
+              </Button>
             </div>
 
             {/* Toggle Panel Button */}
@@ -1076,6 +1108,91 @@ export function CompetitionLivePage() {
                 {t('competition.refereeMode', '裁判模式')}
               </span>
             </>
+          )}
+        </div>
+      )}
+
+      {/* Participants Panel - Slide-in from right */}
+      {(userRole === 'host' || userRole === 'referee') && showParticipantsPanel && (
+        <div
+          className="fixed right-4 top-20 z-50 max-h-[70vh] w-80 overflow-hidden rounded-2xl shadow-2xl"
+          style={{ backgroundColor: colors.background, border: `1px solid ${colors.secondary}40` }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.secondary + '40' }}>
+            <h3 className="font-semibold" style={{ color: colors.text }}>
+              {t('competition.participantsList', '参与者列表')}
+            </h3>
+            <button onClick={() => setShowParticipantsPanel(false)} className="rounded p-1 hover:bg-gray-500/20">
+              <XIcon className="h-4 w-4" style={{ color: colors.text }} />
+            </button>
+          </div>
+
+          {/* Participant List */}
+          <div className="max-h-[50vh] overflow-y-auto p-2">
+            {leaderboard.length === 0 ? (
+              <p className="p-4 text-center text-sm" style={{ color: colors.text + '60' }}>
+                {t('competition.noParticipantsYet', '暂无参与者')}
+              </p>
+            ) : (
+              leaderboard.map((entry) => (
+                <div
+                  key={entry.participantId}
+                  onClick={() => setSelectedParticipant(selectedParticipant?.participantId === entry.participantId ? null : entry)}
+                  className={cn(
+                    "flex cursor-pointer items-center justify-between rounded-lg p-3 transition-colors",
+                    selectedParticipant?.participantId === entry.participantId ? "bg-[var(--color-primary)]/20" : "hover:bg-gray-500/10"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: colors.primary + '30', color: colors.primary }}>
+                      {entry.rank}
+                    </span>
+                    <span className="text-sm font-medium" style={{ color: colors.text }}>
+                      {entry.nickname}
+                    </span>
+                  </div>
+                  <span className="font-mono font-bold" style={{ color: colors.accent }}>
+                    {entry.totalScore}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Score Adjustment Panel */}
+          {selectedParticipant && (
+            <div className="border-t p-4" style={{ borderColor: colors.secondary + '40' }}>
+              <p className="mb-2 text-sm font-medium" style={{ color: colors.text }}>
+                {t('competition.adjustScore', '调整分数')}: {selectedParticipant.nickname}
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={bonusPoints}
+                  onChange={(e) => setBonusPoints(e.target.value)}
+                  placeholder={t('competition.bonusPoints', '加减分') as string}
+                  className="flex-1 rounded-lg border px-3 py-2 text-sm"
+                  style={{ backgroundColor: colors.background, borderColor: colors.secondary, color: colors.text }}
+                />
+                <Button
+                  onClick={handleAddBonus}
+                  size="sm"
+                  disabled={!bonusPoints}
+                  style={{ backgroundColor: colors.primary }}
+                >
+                  {t('common.confirm', '确认')}
+                </Button>
+              </div>
+              <input
+                type="text"
+                value={bonusReason}
+                onChange={(e) => setBonusReason(e.target.value)}
+                placeholder={t('competition.reason', '原因(可选)') as string}
+                className="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
+                style={{ backgroundColor: colors.background, borderColor: colors.secondary, color: colors.text }}
+              />
+            </div>
           )}
         </div>
       )}
@@ -2040,6 +2157,17 @@ function BackIcon({ className, style }: IconProps) {
   return (
     <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="15 18 9 12 15 6" />
+    </svg>
+  );
+}
+
+function UsersIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   );
 }
