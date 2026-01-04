@@ -113,11 +113,11 @@ export function CompetitionHostPage() {
   const [visibilityStates, setVisibilityStates] = useState<QuestionDisplayState[]>([]);
   const [showQuestionPanel, setShowQuestionPanel] = useState(false);
 
-  // Timer state from server
+  // Timer state from server (all values in SECONDS for display)
   const [timerState, setTimerState] = useState({
     remainingTime: 0,
     isRunning: false,
-    totalDuration: 60000,
+    totalDuration: 60, // seconds
   });
 
   // Helper to convert API questions to unified format
@@ -174,7 +174,7 @@ export function CompetitionHostPage() {
         timerState: {
           remainingTime: 0,
           isRunning: false,
-          totalDuration: compData.settings.questionTimeLimit * 1000 || 60000,
+          totalDuration: compData.settings.questionTimeLimit || 60, // seconds
         },
       });
       setLeaderboard(leaderboardData);
@@ -262,6 +262,16 @@ export function CompetitionHostPage() {
         setTeams(data.teams || []);
         setLeaderboard(data.leaderboard);
         setParticipantCount(data.competition.participantCount);
+
+        // Set timer state from server (convert ms to seconds)
+        if (data.competition.timerState) {
+          const ts = data.competition.timerState;
+          setTimerState({
+            remainingTime: Math.ceil((ts.remainingTime || 0) / 1000),
+            isRunning: ts.isRunning || false,
+            totalDuration: Math.ceil((ts.totalDuration || 60000) / 1000),
+          });
+        }
       });
 
       socket.on('participant:joined', () => {
@@ -466,12 +476,15 @@ export function CompetitionHostPage() {
     socketRef.current?.emit('timer:resume', { competitionId: id });
   };
 
-  const handleTimerReset = (duration?: number) => {
-    socketRef.current?.emit('timer:reset', { competitionId: id, duration });
+  const handleTimerReset = (durationSeconds?: number) => {
+    // Convert seconds to milliseconds for backend (schema expects ms)
+    const durationMs = durationSeconds ? durationSeconds * 1000 : undefined;
+    socketRef.current?.emit('timer:reset', { competitionId: id, duration: durationMs });
   };
 
   const handleTimerAdjust = (seconds: number) => {
-    socketRef.current?.emit('timer:adjust', { competitionId: id, adjustment: seconds });
+    // Convert seconds to milliseconds for backend (schema expects ms)
+    socketRef.current?.emit('timer:adjust', { competitionId: id, adjustment: seconds * 1000 });
   };
 
   const handleOpenDisplayScreen = () => {

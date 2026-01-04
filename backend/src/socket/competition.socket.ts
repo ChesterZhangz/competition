@@ -254,6 +254,31 @@ export function setupCompetitionSocket(io: Server): void {
           ? await teamService.getTeamsByCompetition(comp._id.toString())
           : [];
 
+        // Get real-time timer state from Redis
+        const redisTimerState = await timerService.getTimerState(comp._id.toString());
+        let actualRemainingTime = redisTimerState?.remainingTime || 0;
+        if (redisTimerState?.isRunning && redisTimerState?.startedAt) {
+          const elapsed = Date.now() - redisTimerState.startedAt;
+          actualRemainingTime = Math.max(0, redisTimerState.remainingTime - elapsed);
+        }
+
+        // Get current question if in question phase
+        let currentQuestion = null;
+        if (comp.currentPhase === 'question' && comp.currentQuestionIndex >= 0) {
+          const question = questions.find(q => q.order === comp.currentQuestionIndex);
+          if (question && question.problemId) {
+            currentQuestion = {
+              questionId: question._id.toString(),
+              order: question.order,
+              content: question.problemId.content,
+              type: question.problemId.type,
+              options: question.problemId.options,
+              timeLimit: question.timeLimit || comp.settings.questionTimeLimit,
+              points: question.points || comp.settings.basePoints,
+            };
+          }
+        }
+
         socket.emit('joined', {
           competition: {
             id: comp._id,
@@ -267,7 +292,13 @@ export function setupCompetitionSocket(io: Server): void {
             settings: comp.settings,
             participantCount: comp.participantCount,
             teamCount: comp.teamCount,
+            timerState: redisTimerState ? {
+              remainingTime: actualRemainingTime,
+              isRunning: redisTimerState.isRunning,
+              totalDuration: redisTimerState.totalDuration,
+            } : null,
           },
+          currentQuestion,
           participant: {
             id: participant._id,
             nickname: participant.nickname,
@@ -361,6 +392,15 @@ export function setupCompetitionSocket(io: Server): void {
           ? await teamService.getTeamsByCompetition(competition._id.toString())
           : [];
 
+        // Get real-time timer state from Redis
+        const redisTimerState = await timerService.getTimerState(competitionId);
+        // Calculate actual remaining time if timer is running
+        let actualRemainingTime = redisTimerState?.remainingTime || 0;
+        if (redisTimerState?.isRunning && redisTimerState?.startedAt) {
+          const elapsed = Date.now() - redisTimerState.startedAt;
+          actualRemainingTime = Math.max(0, redisTimerState.remainingTime - elapsed);
+        }
+
         socket.emit('host:joined', {
           competition: {
             id: competition._id,
@@ -373,7 +413,12 @@ export function setupCompetitionSocket(io: Server): void {
             currentQuestionIndex: competition.currentQuestionIndex,
             questionCount: competition.questionCount,
             settings: competition.settings,
-            timerState: competition.timerState,
+            // Use Redis timer state if available, otherwise use MongoDB state
+            timerState: redisTimerState ? {
+              remainingTime: actualRemainingTime,
+              isRunning: redisTimerState.isRunning,
+              totalDuration: redisTimerState.totalDuration,
+            } : competition.timerState,
             participantCount: competition.participantCount,
             teamCount: competition.teamCount,
             joinCode: competition.joinCode,
@@ -431,6 +476,33 @@ export function setupCompetitionSocket(io: Server): void {
         const rooms = getRooms(competition._id.toString());
         socket.join([rooms.all, rooms.display]);
 
+        // Get current question if competition is in question phase
+        let currentQuestion = null;
+        const questions = await competitionService.getQuestions(competitionId);
+        if (competition.currentPhase === 'question' && competition.currentQuestionIndex >= 0) {
+          const question = questions.find(q => q.order === competition.currentQuestionIndex);
+          if (question && question.problemId) {
+            currentQuestion = {
+              questionId: question._id.toString(),
+              order: question.order,
+              content: question.problemId.content,
+              type: question.problemId.type,
+              options: question.problemId.options,
+              timeLimit: question.timeLimit || competition.settings.questionTimeLimit,
+              points: question.points || competition.settings.basePoints,
+            };
+          }
+        }
+
+        // Get real-time timer state from Redis
+        const redisTimerState = await timerService.getTimerState(competitionId);
+        // Calculate actual remaining time if timer is running
+        let actualRemainingTime = redisTimerState?.remainingTime || 0;
+        if (redisTimerState?.isRunning && redisTimerState?.startedAt) {
+          const elapsed = Date.now() - redisTimerState.startedAt;
+          actualRemainingTime = Math.max(0, redisTimerState.remainingTime - elapsed);
+        }
+
         socket.emit('display:joined', {
           competition: {
             id: competition._id,
@@ -442,11 +514,29 @@ export function setupCompetitionSocket(io: Server): void {
             currentQuestionIndex: competition.currentQuestionIndex,
             questionCount: competition.questionCount,
             settings: competition.settings,
-            timerState: competition.timerState,
+            timerState: redisTimerState ? {
+              remainingTime: actualRemainingTime,
+              isRunning: redisTimerState.isRunning,
+              totalDuration: redisTimerState.totalDuration,
+            } : competition.timerState,
             participantCount: competition.participantCount,
             teamCount: competition.teamCount,
             joinCode: competition.joinCode,
           },
+          currentQuestion,
+          questions: questions.map(q => ({
+            id: q._id,
+            order: q.order,
+            status: q.status,
+            points: q.points,
+            timeLimit: q.timeLimit,
+            problem: q.problemId ? {
+              id: q.problemId._id,
+              content: q.problemId.content,
+              type: q.problemId.type,
+              options: q.problemId.options,
+            } : null,
+          })),
         });
       } catch (error) {
         socket.emit('error', { message: (error as Error).message });
@@ -1035,10 +1125,12 @@ export function setupCompetitionSocket(io: Server): void {
           return;
         }
 
+        // duration is in milliseconds from frontend, convert to seconds for timerService
+        const durationSeconds = Math.ceil(duration / 1000);
         await timerService.startTimer(
           competitionId,
           competition.currentQuestionIndex,
-          duration
+          durationSeconds
         );
       } catch (error) {
         socket.emit('error', { message: (error as Error).message });
@@ -1099,7 +1191,9 @@ export function setupCompetitionSocket(io: Server): void {
           return;
         }
 
-        await timerService.resetTimer(competitionId, duration);
+        // duration is in milliseconds from frontend, convert to seconds for timerService
+        const durationSeconds = duration ? Math.ceil(duration / 1000) : undefined;
+        await timerService.resetTimer(competitionId, durationSeconds);
       } catch (error) {
         socket.emit('error', { message: (error as Error).message });
       }
@@ -1119,7 +1213,9 @@ export function setupCompetitionSocket(io: Server): void {
           return;
         }
 
-        await timerService.adjustTimer(competitionId, adjustment);
+        // adjustment is in milliseconds from frontend, convert to seconds for timerService
+        const adjustmentSeconds = Math.round(adjustment / 1000);
+        await timerService.adjustTimer(competitionId, adjustmentSeconds);
       } catch (error) {
         socket.emit('error', { message: (error as Error).message });
       }

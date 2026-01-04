@@ -87,6 +87,7 @@ export function CompetitionDetailPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'ongoing': return 'bg-[var(--color-success-bg)] text-[var(--color-success)]';
+      case 'paused': return 'bg-yellow-500/20 text-yellow-500';
       case 'finished': return 'bg-[var(--color-secondary)] text-[var(--color-muted)]';
       case 'waiting': return 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]';
       default: return 'bg-[var(--color-info-bg)] text-[var(--color-info)]';
@@ -165,9 +166,13 @@ export function CompetitionDetailPage() {
               <Button>{t('competition.startHost', 'Start Hosting')}</Button>
             </Link>
           )}
-          {competition.status === 'ongoing' && (
+          {(competition.status === 'ongoing' || competition.status === 'paused') && (
             <Link to={`/competitions/${id}/host`}>
-              <Button>{t('competition.continueHost', 'Continue Hosting')}</Button>
+              <Button>
+                {competition.status === 'paused'
+                  ? t('competition.resumeHost', 'Resume Hosting')
+                  : t('competition.continueHost', 'Continue Hosting')}
+              </Button>
             </Link>
           )}
           {competition.status === 'finished' && (

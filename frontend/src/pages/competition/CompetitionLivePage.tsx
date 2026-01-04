@@ -1,14 +1,14 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { QRCodeSVG } from 'qrcode.react';
+import { io, Socket } from 'socket.io-client';
 import { cn } from '@/lib/utils';
 import { IconLoading } from '@/components/icons/feedback/IconLoading';
 import { IconTrophy } from '@/components/icons/competition/IconTrophy';
 import { IconTimer } from '@/components/icons/competition/IconTimer';
 import { LaTeXRenderer } from '@/components/ui/latex-renderer';
 import { competitionApi } from '@/services/competition.api';
-import { getSocket } from '@/services/socket';
 import {
   type CompetitionDisplaySettings,
   type CustomThemeColors,
@@ -74,6 +74,7 @@ interface Team {
 export function CompetitionLivePage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
+  const socketRef = useRef<Socket | null>(null);
 
   const [competition, setCompetition] = useState<Competition | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -90,6 +91,7 @@ export function CompetitionLivePage() {
   const [participantCount, setParticipantCount] = useState(0);
   const [teamCount, setTeamCount] = useState(0);
   const [countdownValue, setCountdownValue] = useState(3);
+  const [isPaused, setIsPaused] = useState(false);
 
   // Get display settings with fallback
   const displaySettings = useMemo(
@@ -179,10 +181,115 @@ export function CompetitionLivePage() {
   useEffect(() => {
     fetchData();
 
-    const socket = getSocket();
-    if (id && socket) {
-      // Join as display
+    if (!id) return;
+
+    // Create dedicated socket connection for display screen
+    const socket = io('/competition', {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+    });
+    socketRef.current = socket;
+
+    // Join as display on connect and reconnect
+    socket.on('connect', () => {
+      console.log('Display socket connected');
       socket.emit('join:display', { competitionId: id });
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Display socket connection error:', error);
+    });
+
+    socket.on('error', (data: { message: string }) => {
+      console.error('Display socket error:', data.message);
+    });
+
+    // Handle display:joined response - get current state including question
+    socket.on('display:joined', (data: {
+        competition: {
+          currentPhase: CompetitionPhase;
+          currentQuestionIndex: number;
+          timerState?: {
+            remainingTime: number;
+            isRunning: boolean;
+            totalDuration?: number;
+          };
+        };
+        currentQuestion?: {
+          questionId: string;
+          order: number;
+          content: string;
+          type: string;
+          options?: Array<{ id: string; label: string; content: string }>;
+          timeLimit: number;
+          points: number;
+        };
+        questions?: Array<{
+          id: string;
+          order: number;
+          status: string;
+          points: number;
+          timeLimit: number;
+          problem?: {
+            id: string;
+            content: string;
+            type: string;
+            options?: Array<{ id: string; label: string; content: string }>;
+          };
+        }>;
+      }) => {
+        // Set current phase from server
+        if (data.competition.currentPhase) {
+          setCurrentPhase(data.competition.currentPhase);
+        }
+        if (data.competition.currentQuestionIndex !== undefined) {
+          setCurrentQuestionIndex(data.competition.currentQuestionIndex);
+        }
+
+        // Set timer state from server (convert ms to seconds)
+        if (data.competition.timerState) {
+          const ts = data.competition.timerState;
+          setTimerState({
+            remainingTime: Math.ceil((ts.remainingTime || 0) / 1000),
+            isRunning: ts.isRunning || false,
+            totalDuration: Math.ceil((ts.totalDuration || 60000) / 1000),
+          });
+        }
+
+        // Set current question if available
+        console.log('Display joined:', {
+          phase: data.competition.currentPhase,
+          questionIndex: data.competition.currentQuestionIndex,
+          hasCurrentQuestion: !!data.currentQuestion
+        });
+        if (data.currentQuestion) {
+          console.log('Setting currentQuestion from display:joined:', data.currentQuestion);
+          setCurrentQuestion({
+            _id: data.currentQuestion.questionId,
+            number: data.currentQuestion.order,
+            content: data.currentQuestion.content,
+            type: data.currentQuestion.type as 'choice' | 'blank' | 'answer',
+            options: data.currentQuestion.options,
+            timeLimit: data.currentQuestion.timeLimit,
+            points: data.currentQuestion.points,
+          });
+        }
+
+        // Update questions list if provided
+        if (data.questions && data.questions.length > 0) {
+          setQuestions(data.questions.map((q, i) => ({
+            _id: q.id,
+            number: i + 1,
+            content: q.problem?.content || '',
+            type: (q.problem?.type || 'choice') as 'choice' | 'blank' | 'answer',
+            options: q.problem?.options,
+            timeLimit: q.timeLimit,
+            points: q.points,
+          })));
+        }
+      });
 
       // Competition lifecycle events
       socket.on('competition:started', (data: { phase: CompetitionPhase }) => {
@@ -191,10 +298,12 @@ export function CompetitionLivePage() {
 
       socket.on('competition:paused', () => {
         setTimerState(prev => ({ ...prev, isRunning: false }));
+        setIsPaused(true);
       });
 
       socket.on('competition:resumed', () => {
         setTimerState(prev => ({ ...prev, isRunning: true }));
+        setIsPaused(false);
       });
 
       socket.on('competition:ended', () => {
@@ -225,6 +334,7 @@ export function CompetitionLivePage() {
         points: number;
         phase: string;
       }) => {
+        console.log('Display: Received question:show event:', data);
         setCurrentQuestionIndex(data.order);
         setCurrentQuestion({
           _id: data.questionId,
@@ -351,34 +461,11 @@ export function CompetitionLivePage() {
       socket.on('questions:reorder', (data: { visibilityStates: QuestionDisplayState[] }) => {
         setVisibilityStates(data.visibilityStates);
       });
-    }
 
     return () => {
-      const socket = getSocket();
-      if (socket) {
-        socket.off('competition:started');
-        socket.off('competition:paused');
-        socket.off('competition:resumed');
-        socket.off('competition:ended');
-        socket.off('phase:changed');
-        socket.off('question:show');
-        socket.off('answer:revealed');
-        socket.off('timer:tick');
-        socket.off('timer:started');
-        socket.off('timer:paused');
-        socket.off('timer:resumed');
-        socket.off('timer:reset');
-        socket.off('timer:ended');
-        socket.off('participant:joined');
-        socket.off('participant:left');
-        socket.off('team:created');
-        socket.off('team:updated');
-        socket.off('team:member-joined');
-        socket.off('team:member-left');
-        socket.off('leaderboard:update');
-        socket.off('leaderboard:toggle');
-        socket.off('questions:visibility');
-        socket.off('questions:reorder');
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
     };
   }, [id, fetchData]);
@@ -436,6 +523,25 @@ export function CompetitionLivePage() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: colors.background, color: colors.text }}>
+      {/* Paused Overlay - Full screen when competition is paused */}
+      {isPaused && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
+          <div className="text-center">
+            <div className="mb-8 flex items-center justify-center gap-6">
+              <svg className="h-24 w-24 animate-pulse text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h1 className="text-6xl font-bold text-yellow-500">
+              {t('competition.paused', '比赛已暂停')}
+            </h1>
+            <p className="mt-6 text-2xl text-yellow-400/80">
+              {t('competition.pausedHint', '请等待主持人继续比赛...')}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Setup Phase - Preparing */}
       {currentPhase === 'setup' && (
         <SetupScreen competition={competition} colors={colors} />

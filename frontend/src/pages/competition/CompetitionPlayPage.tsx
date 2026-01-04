@@ -93,6 +93,9 @@ export function CompetitionPlayPage() {
   // Countdown
   const [countdownValue, setCountdownValue] = useState(3);
 
+  // Paused state - for showing visual indicator
+  const [isPaused, setIsPaused] = useState(false);
+
   // Derived state
   const canSubmit = useMemo(() => {
     if (myRole === 'viewer') return false;
@@ -282,6 +285,56 @@ export function CompetitionPlayPage() {
     // Join as participant
     socket.emit('join', { competitionId: id, participantId: localStorage.getItem(`competition_${id}_participantId`) });
 
+    // Handle joined response - get current state including question and timer
+    socket.on('joined', (data: {
+      competition: {
+        currentPhase: CompetitionPhase;
+        currentQuestionIndex: number;
+        timerState?: {
+          remainingTime: number;
+          isRunning: boolean;
+          totalDuration: number;
+        };
+      };
+      currentQuestion?: {
+        questionId: string;
+        order: number;
+        content: string;
+        type: string;
+        options?: Array<{ id: string; label: string; content: string }>;
+        timeLimit: number;
+        points: number;
+      };
+    }) => {
+      // Set current phase from server
+      if (data.competition.currentPhase) {
+        setCurrentPhase(data.competition.currentPhase);
+      }
+
+      // Set timer state from server (convert ms to seconds)
+      if (data.competition.timerState) {
+        const ts = data.competition.timerState;
+        setTimerState({
+          remainingTime: Math.ceil((ts.remainingTime || 0) / 1000),
+          isRunning: ts.isRunning || false,
+          totalDuration: Math.ceil((ts.totalDuration || 60000) / 1000),
+        });
+      }
+
+      // Set current question if available
+      if (data.currentQuestion) {
+        setCurrentQuestion({
+          _id: data.currentQuestion.questionId,
+          number: data.currentQuestion.order,
+          content: data.currentQuestion.content,
+          type: data.currentQuestion.type as 'choice' | 'blank' | 'answer',
+          options: data.currentQuestion.options,
+          timeLimit: data.currentQuestion.timeLimit,
+          points: data.currentQuestion.points,
+        });
+      }
+    });
+
     // Competition lifecycle
     socket.on('competition:started', (data: { phase: CompetitionPhase }) => {
       setCurrentPhase(data.phase || 'waiting');
@@ -289,10 +342,12 @@ export function CompetitionPlayPage() {
 
     socket.on('competition:paused', () => {
       setTimerState(prev => ({ ...prev, isRunning: false }));
+      setIsPaused(true);
     });
 
     socket.on('competition:resumed', () => {
       setTimerState(prev => ({ ...prev, isRunning: true }));
+      setIsPaused(false);
     });
 
     socket.on('competition:ended', (data: { totalScore: number; finalRank: number }) => {
@@ -458,6 +513,7 @@ export function CompetitionPlayPage() {
     });
 
     return () => {
+      socket.off('joined');
       socket.off('competition:started');
       socket.off('competition:paused');
       socket.off('competition:resumed');
@@ -548,6 +604,26 @@ export function CompetitionPlayPage() {
           )}
         </div>
       </div>
+
+      {/* Paused Status Overlay - Shown when competition is paused */}
+      {isPaused && (
+        <div className="mb-6 animate-pulse rounded-xl border-2 border-yellow-500/50 bg-yellow-500/10 p-4">
+          <div className="flex items-center justify-center gap-3">
+            <svg className="h-6 w-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-lg font-bold text-yellow-500">
+              {t('competition.paused', '比赛已暂停')}
+            </span>
+            <svg className="h-6 w-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <p className="mt-2 text-center text-sm text-yellow-400/80">
+            {t('competition.pausedHint', '请等待主持人继续比赛...')}
+          </p>
+        </div>
+      )}
 
       {/* Setup Phase */}
       {currentPhase === 'setup' && (

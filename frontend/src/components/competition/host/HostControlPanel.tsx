@@ -81,10 +81,10 @@ export function HostControlPanel({
   const { t } = useTranslation();
   const [customDuration, setCustomDuration] = useState(60);
 
-  const formatTime = (ms: number) => {
-    const seconds = Math.floor(ms / 1000);
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+  // timerState values are now in SECONDS
+  const formatTime = (totalSeconds: number) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = Math.floor(totalSeconds % 60);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -198,12 +198,12 @@ export function HostControlPanel({
             <IconTimer
               size={32}
               state={timerState.isRunning ? 'active' : 'idle'}
-              className={cn(timerState.remainingTime < 10000 && timerState.isRunning && 'text-red-500')}
+              className={cn(timerState.remainingTime < 10 && timerState.isRunning && 'text-red-500')}
             />
             <span
               className={cn(
                 'font-mono text-4xl font-bold',
-                timerState.remainingTime < 10000 && timerState.isRunning && 'animate-pulse text-red-500'
+                timerState.remainingTime < 10 && timerState.isRunning && 'animate-pulse text-red-500'
               )}
             >
               {formatTime(timerState.remainingTime)}
@@ -222,7 +222,7 @@ export function HostControlPanel({
                 {t('competition.timerPause', 'Pause')}
               </Button>
             )}
-            <Button onClick={() => onTimerReset()} size="sm" variant="outline">
+            <Button onClick={() => onTimerReset(timerState.totalDuration || customDuration)} size="sm" variant="outline">
               {t('competition.timerReset', 'Reset')}
             </Button>
           </div>
