@@ -8,7 +8,7 @@ import { IconLoading } from '@/components/icons/feedback/IconLoading';
 import { LayoutSelector } from '@/components/competition/LayoutSelector';
 import { ThemeSelector } from '@/components/competition/ThemeSelector';
 import { LaTeXRenderer } from '@/components/ui/latex-renderer';
-import { competitionApi, type Referee, type RefereePermission } from '@/services/competition.api';
+import { competitionApi } from '@/services/competition.api';
 import { problemApi } from '@/services/problem.api';
 import {
   type LayoutType,
@@ -16,15 +16,6 @@ import {
   type CompetitionDisplaySettings,
   DEFAULT_DISPLAY_SETTINGS,
 } from '@/types/competition';
-
-const REFEREE_PERMISSIONS: { key: RefereePermission; labelKey: string; descKey: string }[] = [
-  { key: 'override_score', labelKey: 'competition.referee.permission.overrideScore', descKey: 'competition.referee.permission.overrideScoreDesc' },
-  { key: 'manual_judge', labelKey: 'competition.referee.permission.manualJudge', descKey: 'competition.referee.permission.manualJudgeDesc' },
-  { key: 'add_comment', labelKey: 'competition.referee.permission.addComment', descKey: 'competition.referee.permission.addCommentDesc' },
-  { key: 'pause_competition', labelKey: 'competition.referee.permission.pauseCompetition', descKey: 'competition.referee.permission.pauseCompetitionDesc' },
-  { key: 'skip_question', labelKey: 'competition.referee.permission.skipQuestion', descKey: 'competition.referee.permission.skipQuestionDesc' },
-  { key: 'extend_time', labelKey: 'competition.referee.permission.extendTime', descKey: 'competition.referee.permission.extendTimeDesc' },
-];
 
 type CompetitionType = 'integration_bee' | 'fun_math' | 'quiz' | 'speed_math';
 type CompetitionMode = 'onsite' | 'online';
@@ -107,30 +98,16 @@ export function CompetitionEditPage() {
   const [isLoadingProblems, setIsLoadingProblems] = useState(false);
   const [isAddingQuestions, setIsAddingQuestions] = useState(false);
 
-  // Referee management
-  const [referees, setReferees] = useState<Referee[]>([]);
-  const [refereeEnabled, setRefereeEnabled] = useState(false);
-  const [maxReferees, setMaxReferees] = useState(5);
-  const [refereePermissions, setRefereePermissions] = useState<RefereePermission[]>([
-    'override_score',
-    'manual_judge',
-    'add_comment',
-  ]);
-  const [newRefereeEmail, setNewRefereeEmail] = useState('');
-  const [isAddingReferee, setIsAddingReferee] = useState(false);
-  const [refereeError, setRefereeError] = useState('');
-
   // Load competition data
   useEffect(() => {
     const fetchData = async () => {
       if (!id) return;
       setIsLoading(true);
       try {
-        const [compData, questionsData, banksData, refereesData] = await Promise.all([
+        const [compData, questionsData, banksData] = await Promise.all([
           competitionApi.get(id),
           competitionApi.getQuestions(id),
           problemApi.banks.list({ limit: 100 }),
-          competitionApi.getReferees(id).catch(() => []),
         ]);
 
         // Set competition data
@@ -149,22 +126,11 @@ export function CompetitionEditPage() {
           setDisplaySettings(compData.displaySettings);
         }
 
-        // Set referee settings
-        const compDataWithReferee = compData as { refereeSettings?: { enabled: boolean; maxReferees: number; permissions: RefereePermission[] } };
-        if (compDataWithReferee.refereeSettings) {
-          setRefereeEnabled(compDataWithReferee.refereeSettings.enabled);
-          setMaxReferees(compDataWithReferee.refereeSettings.maxReferees);
-          setRefereePermissions(compDataWithReferee.refereeSettings.permissions);
-        }
-
         // Set questions
         setQuestions(questionsData as unknown as CompetitionQuestion[]);
 
         // Set problem banks
         setProblemBanks(banksData.items);
-
-        // Set referees
-        setReferees(refereesData);
       } catch (err) {
         setError(err instanceof Error ? err.message : t('error.fetchFailed', 'Failed to fetch data'));
       } finally {
@@ -233,12 +199,7 @@ export function CompetitionEditPage() {
           showCorrectAnswer,
         },
         displaySettings,
-        refereeSettings: {
-          enabled: refereeEnabled,
-          maxReferees,
-          permissions: refereePermissions,
-        },
-      } as Partial<Competition> & { refereeSettings: { enabled: boolean; maxReferees: number; permissions: RefereePermission[] } });
+      } as Partial<Competition>);
       navigate(`/competitions/${id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('error.updateFailed', 'Failed to update'));
@@ -286,61 +247,6 @@ export function CompetitionEditPage() {
       }
       return next;
     });
-  };
-
-  // Referee management functions
-  const toggleRefereePermission = (permission: RefereePermission) => {
-    setRefereePermissions((prev) => {
-      if (prev.includes(permission)) {
-        return prev.filter((p) => p !== permission);
-      }
-      return [...prev, permission];
-    });
-  };
-
-  const handleAddReferee = async () => {
-    if (!id || !newRefereeEmail.trim()) return;
-
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(newRefereeEmail.trim())) {
-      setRefereeError(t('competition.referee.invalidEmail', 'Please enter a valid email address'));
-      return;
-    }
-
-    // Check if already added
-    if (referees.some((r) => r.email.toLowerCase() === newRefereeEmail.trim().toLowerCase())) {
-      setRefereeError(t('competition.referee.alreadyAdded', 'This referee has already been added'));
-      return;
-    }
-
-    // Check max referees
-    if (referees.length >= maxReferees) {
-      setRefereeError(t('competition.referee.maxReached', 'Maximum number of referees reached'));
-      return;
-    }
-
-    setIsAddingReferee(true);
-    setRefereeError('');
-    try {
-      const newReferee = await competitionApi.addReferee(id, newRefereeEmail.trim());
-      setReferees((prev) => [...prev, newReferee]);
-      setNewRefereeEmail('');
-    } catch (err) {
-      setRefereeError(err instanceof Error ? err.message : t('error.addFailed', 'Failed to add referee'));
-    } finally {
-      setIsAddingReferee(false);
-    }
-  };
-
-  const handleRemoveReferee = async (refereeUserId: string) => {
-    if (!id) return;
-    try {
-      await competitionApi.removeReferee(id, refereeUserId);
-      setReferees((prev) => prev.filter((r) => r.userId !== refereeUserId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('error.removeFailed', 'Failed to remove referee'));
-    }
   };
 
   const isReadOnly = status !== 'draft';
@@ -590,161 +496,6 @@ export function CompetitionEditPage() {
               <span className="text-sm">{t('competition.display.showQuestionNumber', 'Show question numbers')}</span>
             </label>
           </div>
-        </div>
-      </GlassCard>
-
-      {/* Referee Settings */}
-      <GlassCard className="p-6">
-        <h2 className="mb-4 text-lg font-semibold">{t('competition.referee.title', 'Referee Settings')}</h2>
-
-        <div className="space-y-6">
-          {/* Enable/Disable Referee */}
-          <label className="flex cursor-pointer items-center gap-3">
-            <input
-              type="checkbox"
-              checked={refereeEnabled}
-              onChange={(e) => setRefereeEnabled(e.target.checked)}
-              disabled={isReadOnly}
-              className="h-4 w-4 accent-[var(--color-primary)]"
-            />
-            <div>
-              <span className="font-medium">{t('competition.referee.enable', 'Enable Referees')}</span>
-              <p className="text-sm text-[var(--color-muted)]">
-                {t('competition.referee.enableDesc', 'Allow referees to monitor and judge submissions')}
-              </p>
-            </div>
-          </label>
-
-          {refereeEnabled && (
-            <>
-              {/* Max Referees */}
-              <div className="space-y-2">
-                <label className="block text-sm font-medium">
-                  {t('competition.referee.maxReferees', 'Maximum Referees')}
-                </label>
-                <Input
-                  type="number"
-                  value={maxReferees}
-                  onChange={(e) => setMaxReferees(parseInt(e.target.value) || 1)}
-                  min={1}
-                  max={20}
-                  disabled={isReadOnly}
-                />
-              </div>
-
-              {/* Permissions */}
-              <div className="space-y-3">
-                <label className="block text-sm font-medium">
-                  {t('competition.referee.permissions', 'Referee Permissions')}
-                </label>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {REFEREE_PERMISSIONS.map((perm) => (
-                    <label
-                      key={perm.key}
-                      className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] p-3 transition-colors hover:bg-[var(--color-secondary)]"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={refereePermissions.includes(perm.key)}
-                        onChange={() => toggleRefereePermission(perm.key)}
-                        disabled={isReadOnly}
-                        className="mt-1 h-4 w-4 accent-[var(--color-primary)]"
-                      />
-                      <div>
-                        <span className="font-medium">{t(perm.labelKey, perm.key)}</span>
-                        <p className="text-xs text-[var(--color-muted)]">{t(perm.descKey, '')}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Manage Referees */}
-              <div className="space-y-4 border-t border-[var(--color-border)] pt-4">
-                <h3 className="font-medium">
-                  {t('competition.referee.manage', 'Manage Referees')} ({referees.length}/{maxReferees})
-                </h3>
-
-                {/* Current Referees List */}
-                {referees.length > 0 && (
-                  <div className="space-y-2">
-                    {referees.map((referee) => (
-                      <div
-                        key={referee.userId}
-                        className="flex items-center justify-between rounded-lg bg-[var(--color-card)] p-3"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`h-2 w-2 rounded-full ${
-                              referee.isOnline ? 'bg-[var(--color-success)]' : 'bg-[var(--color-muted)]'
-                            }`}
-                          />
-                          <div>
-                            <span className="font-medium">{referee.nickname || referee.email}</span>
-                            {referee.nickname && (
-                              <span className="ml-2 text-sm text-[var(--color-muted)]">{referee.email}</span>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => handleRemoveReferee(referee.userId)}
-                          className="text-[var(--color-error)] hover:text-[var(--color-error)]/80"
-                          title={t('common.remove', 'Remove')}
-                        >
-                          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add Referee */}
-                {referees.length < maxReferees && (
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium">
-                      {t('competition.referee.addByEmail', 'Add Referee by Email')}
-                    </label>
-                    <div className="flex gap-2">
-                      <Input
-                        type="email"
-                        value={newRefereeEmail}
-                        onChange={(e) => {
-                          setNewRefereeEmail(e.target.value);
-                          setRefereeError('');
-                        }}
-                        placeholder={t('competition.referee.emailPlaceholder', 'Enter referee email address')}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddReferee();
-                          }
-                        }}
-                        className="flex-1"
-                      />
-                      <Button
-                        onClick={handleAddReferee}
-                        disabled={isAddingReferee || !newRefereeEmail.trim()}
-                      >
-                        {isAddingReferee ? (
-                          <IconLoading size={16} state="loading" />
-                        ) : (
-                          t('common.add', 'Add')
-                        )}
-                      </Button>
-                    </div>
-                    {refereeError && (
-                      <p className="text-sm text-[var(--color-error)]">{refereeError}</p>
-                    )}
-                    <p className="text-xs text-[var(--color-muted)]">
-                      {t('competition.referee.addNote', 'The user must have a registered account with this email')}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
         </div>
       </GlassCard>
 

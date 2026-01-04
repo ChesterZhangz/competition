@@ -23,6 +23,7 @@ export interface IProblemDocument extends Document {
   content: string;
   options?: IProblemOption[];
   correctAnswer: string | string[];
+  displayAnswer?: string; // Symbolic/LaTeX answer for display (e.g., "$\sin(x)$" instead of "0.841...")
   answerExplanation?: string;
   tags?: mongoose.Types.ObjectId[];
   source?: string;
@@ -70,6 +71,7 @@ const ProblemSchema = new Schema<IProblemDocument>(
       type: Schema.Types.Mixed,
       required: true,
     },
+    displayAnswer: String, // Symbolic/LaTeX answer for display
     answerExplanation: String,
     tags: [{
       type: Schema.Types.ObjectId,

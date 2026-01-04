@@ -893,6 +893,35 @@ export class CompetitionService {
         participant: s.participantId as ICompetitionParticipantDocument,
       }));
   }
+
+  // Search users for referee autocomplete
+  async searchUsers(query: string, limit: number = 10): Promise<Array<{ _id: string; email: string; nickname: string }>> {
+    if (!query || query.length < 2) {
+      return [];
+    }
+
+    // Escape regex special characters to prevent ReDoS attacks
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const users = await User.find({
+      $or: [
+        { email: { $regex: escapedQuery, $options: 'i' } },
+        { nickname: { $regex: escapedQuery, $options: 'i' } },
+      ],
+      status: 'active',
+    })
+      .select('_id email nickname')
+      .limit(limit)
+      .lean();
+
+    return users
+      .filter((u) => u.email) // Only include users with email
+      .map((u) => ({
+        _id: u._id.toString(),
+        email: u.email!,
+        nickname: u.nickname || '',
+      }));
+  }
 }
 
 export const competitionService = new CompetitionService();

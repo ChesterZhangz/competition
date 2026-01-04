@@ -346,4 +346,9 @@ export const competitionApi = {
   getQuestionSubmissions: (competitionId: string, questionId: string): Promise<Submission[]> => {
     return get<Submission[]>(`/competitions/${competitionId}/questions/${questionId}/submissions`);
   },
+
+  // User search for autocomplete
+  searchUsers: (query: string): Promise<Array<{ _id: string; email: string; nickname: string }>> => {
+    return get<Array<{ _id: string; email: string; nickname: string }>>('/competitions/users/search', { q: query });
+  },
 };

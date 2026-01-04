@@ -70,6 +70,7 @@
   "common": {
     "cancel": "Cancel",
     "save": "Save",
+    "saveSettings": "Save Settings",
     "search": "Search",
     "previous": "Previous",
     "next": "Next",
@@ -273,6 +274,11 @@
     "question": "Question",
     "noQuestions": "No questions added yet",
     "manageQuestions": "Manage Questions",
+    "manageReferees": "Manage Referees",
+    "currentQuestions": "Current Questions",
+    "addQuestions": "Add Questions",
+    "goToProblemBank": "Go to Problem Bank",
+    "readOnly": "Read Only",
     "deleteConfirm": "Delete Competition?",
     "deleteWarning": "This action cannot be undone.",
     "startHost": "Start Hosting",
@@ -571,6 +577,11 @@
           "description": "Competition ended, display final results"
         }
       },
+      "awardCeremony": "Award Ceremony",
+      "startCeremony": "Start Award Ceremony",
+      "replayCeremony": "Replay Ceremony",
+      "preparingResults": "Preparing to reveal results...",
+      "honorableMentions": "Honorable Mentions",
       "phase": {
         "intro": "Introduction",
         "setup": "Setup",
@@ -756,6 +767,7 @@
     "currentQuestion": "Current Question",
     "startFirstQuestion": "Start First Question",
     "revealAnswer": "Reveal Answer",
+    "endQuestion": "End Question",
     "showLeaderboard": "Show Leaderboard",
     "teams": "Teams",
     "previewButton": "Preview",
@@ -818,6 +830,8 @@
         "pauseCompetitionDesc": "Pause and resume the competition"
       },
       "manage": "Manage Referees",
+      "noReferees": "No referees added yet",
+      "added": "Referee added",
       "addByEmail": "Add Referee by Email",
       "emailPlaceholder": "Enter referee email address",
       "addNote": "The user must have a registered account with this email",

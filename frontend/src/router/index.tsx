@@ -20,6 +20,8 @@ import {
   CompetitionDemoPage,
   CompetitionRefereePage,
   CompetitionTutorialPage,
+  CompetitionQuestionsPage,
+  CompetitionRefereesPage,
 } from '@/pages/competition';
 
 // Problem Pages
@@ -188,6 +190,22 @@ export function AppRouter() {
           element={
             <ProtectedRoute requireRole={['teacher', 'admin', 'super_admin']}>
               <CompetitionTutorialPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/competitions/:id/questions"
+          element={
+            <ProtectedRoute requireRole={['teacher', 'admin', 'super_admin']}>
+              <CompetitionQuestionsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/competitions/:id/referees"
+          element={
+            <ProtectedRoute requireRole={['teacher', 'admin', 'super_admin']}>
+              <CompetitionRefereesPage />
             </ProtectedRoute>
           }
         />

@@ -11,3 +11,5 @@ export { CompetitionPreviewPage } from './CompetitionPreviewPage';
 export { CompetitionDemoPage } from './CompetitionDemoPage';
 export { CompetitionRefereePage } from './CompetitionRefereePage';
 export { CompetitionTutorialPage } from './CompetitionTutorialPage';
+export { CompetitionQuestionsPage } from './CompetitionQuestionsPage';
+export { CompetitionRefereesPage } from './CompetitionRefereesPage';

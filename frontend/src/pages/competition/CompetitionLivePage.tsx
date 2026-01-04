@@ -12,6 +12,7 @@ import { IconTimer } from '@/components/icons/competition/IconTimer';
 import { LaTeXRenderer } from '@/components/ui/latex-renderer';
 import { competitionApi } from '@/services/competition.api';
 import { ensureValidToken } from '@/services/api';
+import { AwardCeremony } from '@/components/award-ceremony';
 import {
   type CompetitionDisplaySettings,
   type CustomThemeColors,
@@ -120,6 +121,7 @@ export function CompetitionLivePage() {
   const [adjustmentValue, setAdjustmentValue] = useState(0);
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [scoreAdjustments, setScoreAdjustments] = useState<ScoreAdjustment[]>([]);
+  const [showAwardCeremony, setShowAwardCeremony] = useState(false);
 
   // Get display settings with fallback
   const displaySettings = useMemo(
@@ -455,7 +457,11 @@ export function CompetitionLivePage() {
 
       socket.on('competition:ended', () => {
         setCurrentPhase('finished');
-        competitionApi.getLeaderboard(id, 10).then(setLeaderboard);
+        competitionApi.getLeaderboard(id, 10).then((data) => {
+          setLeaderboard(data);
+          // Auto-start award ceremony immediately
+          setShowAwardCeremony(true);
+        });
       });
 
       // Phase change events
@@ -466,8 +472,20 @@ export function CompetitionLivePage() {
         }
         // Start countdown animation when entering countdown phase
         if (data.phase === 'countdown') {
-          setCountdownValue(3);
+          setCountdownValue(2);
         }
+      });
+
+      // Question preparing - starts countdown before showing question
+      socket.on('question:preparing', (data: {
+        questionIndex: number;
+        timeLimit: number;
+        phase: string;
+      }) => {
+        console.log('Display: Question preparing, starting countdown');
+        setCurrentQuestionIndex(data.questionIndex);
+        setCurrentPhase('countdown');
+        setCountdownValue(3);
       });
 
       // Question events - match backend data format
@@ -598,12 +616,38 @@ export function CompetitionLivePage() {
         setTeams(prev => prev.map(t => t.id === data.teamId ? { ...t, memberCount: data.memberCount } : t));
       });
 
+      // Score update events - for real-time score changes from other clients
+      // Note: Local optimistic updates handle the host's own adjustments instantly
+      socket.on('score:updated', (data: {
+        participantId: string;
+        oldScore: number;
+        newScore: number;
+        bonusPoints?: number;
+        reason?: string;
+      }) => {
+        console.log('Score updated from server:', data);
+        // Server confirms the update - ensure score is synced
+        setLeaderboard(prev => {
+          const updated = prev.map(entry =>
+            entry.participantId === data.participantId
+              ? { ...entry, totalScore: data.newScore }
+              : entry
+          );
+          // Re-sort and update ranks
+          return updated
+            .sort((a, b) => b.totalScore - a.totalScore)
+            .map((entry, i) => ({ ...entry, rank: i + 1 }));
+        });
+      });
+
       // Leaderboard events
       socket.on('leaderboard:update', (data: {
         individual?: LeaderboardEntry[];
-        team?: TeamLeaderboardEntry[]
+        leaderboard?: LeaderboardEntry[]; // Backward compatibility
+        team?: TeamLeaderboardEntry[];
       }) => {
-        if (data.individual) setLeaderboard(data.individual);
+        const individualData = data.individual || data.leaderboard;
+        if (individualData) setLeaderboard(individualData);
         if (data.team) setTeamLeaderboard(data.team);
       });
 
@@ -663,10 +707,10 @@ export function CompetitionLivePage() {
   }, [id, userRole]);
 
   const handleRevealAnswer = useCallback(() => {
-    if (socketRef.current && userRole === 'host') {
-      socketRef.current.emit('answer:reveal', { competitionId: id });
+    if (socketRef.current && userRole === 'host' && currentQuestion?._id) {
+      socketRef.current.emit('answer:reveal', { competitionId: id, questionId: currentQuestion._id });
     }
-  }, [id, userRole]);
+  }, [id, userRole, currentQuestion?._id]);
 
   const handleShowLeaderboard = useCallback(() => {
     if (socketRef.current && userRole === 'host') {
@@ -707,26 +751,59 @@ export function CompetitionLivePage() {
   }, [id, userRole]);
 
   // Score adjustment handler - works for both host and referee
+  // Uses optimistic updates for instant feedback
   const handleScoreAdjust = useCallback(() => {
     if (!socketRef.current || !selectedTarget || adjustmentValue === 0) return;
 
+    const targetId = selectedTarget.id;
+    const bonus = adjustmentValue;
+    const targetName = selectedTarget.name;
+
+    // OPTIMISTIC UPDATE: Immediately update the leaderboard
+    if (selectedTarget.type === 'participant') {
+      setLeaderboard(prev => {
+        const updated = prev.map(entry =>
+          entry.participantId === targetId
+            ? { ...entry, totalScore: entry.totalScore + bonus }
+            : entry
+        );
+        // Re-sort by score and update ranks
+        return updated
+          .sort((a, b) => b.totalScore - a.totalScore)
+          .map((entry, i) => ({ ...entry, rank: i + 1 }));
+      });
+    } else if (selectedTarget.type === 'team') {
+      setTeamLeaderboard(prev => {
+        const updated = prev.map(entry =>
+          entry.team.id === targetId
+            ? { ...entry, team: { ...entry.team, totalScore: entry.team.totalScore + bonus } }
+            : entry
+        );
+        // Re-sort by score and update ranks
+        return updated
+          .sort((a, b) => b.team.totalScore - a.team.totalScore)
+          .map((entry, i) => ({ ...entry, rank: i + 1 }));
+      });
+    }
+
+    // Send to server (server will broadcast to all clients)
     socketRef.current.emit('score:addBonus', {
       competitionId: id,
-      participantId: selectedTarget.id,
-      bonusPoints: adjustmentValue,
+      participantId: targetId,
+      bonusPoints: bonus,
       reason: adjustmentReason || undefined,
     });
 
     // Add to local history
     setScoreAdjustments(prev => [{
       id: `adj-${Date.now()}`,
-      targetName: selectedTarget.name,
-      adjustment: adjustmentValue,
+      targetName: targetName,
+      adjustment: bonus,
       reason: adjustmentReason,
       timestamp: new Date(),
     }, ...prev]);
 
-    // Reset form
+    // Reset form immediately for fast UX
     setSelectedTarget(null);
     setAdjustmentValue(0);
     setAdjustmentReason('');
@@ -881,10 +958,29 @@ export function CompetitionLivePage() {
                 </Button>
               )}
 
+              {/* End Question / Stop Timer - visible during question phase */}
               {currentPhase === 'question' && (
-                <Button onClick={handleRevealAnswer} size="sm" className="bg-white/20 hover:bg-white/30 text-white">
+                <Button
+                  onClick={() => {
+                    // Stop timer and switch to revealing phase (waiting for reveal)
+                    socketRef.current?.emit('timer:stop', { competitionId: id });
+                    setTimerState(prev => ({ ...prev, isRunning: false, remainingTime: 0 }));
+                    setCurrentPhase('revealing');
+                  }}
+                  size="sm"
+                  variant="outline"
+                  className="border-orange-400 text-orange-400 hover:bg-orange-500/20"
+                >
+                  <StopIcon className="mr-1 h-4 w-4" />
+                  {t('competition.endQuestion', '结束答题')}
+                </Button>
+              )}
+
+              {/* Reveal Answer - visible during question OR revealing phase (when answer not yet shown) */}
+              {(currentPhase === 'question' || (currentPhase === 'revealing' && !currentQuestion?.correctAnswer)) && (
+                <Button onClick={handleRevealAnswer} size="sm" className="bg-green-600 hover:bg-green-700 text-white">
                   <CheckIcon className="mr-1 h-4 w-4" />
-                  {t('competition.revealAnswer', '揭晓答案')}
+                  {t('competition.revealAnswer', '公布答案')}
                 </Button>
               )}
 
@@ -1042,15 +1138,38 @@ export function CompetitionLivePage() {
             />
           )}
 
-          {/* Finished Screen */}
-          {currentPhase === 'finished' && (
-            <LeaderboardDisplay
-              leaderboard={leaderboard}
-              teamLeaderboard={teamLeaderboard}
-              participantMode={participantMode}
-              isEnded={true}
-              colors={colors}
-            />
+          {/* Finished Screen - only show if ceremony is closed */}
+          {currentPhase === 'finished' && !showAwardCeremony && (
+            <div className="relative">
+              <LeaderboardDisplay
+                leaderboard={leaderboard}
+                teamLeaderboard={teamLeaderboard}
+                participantMode={participantMode}
+                isEnded={true}
+                colors={colors}
+              />
+              {/* Re-open Ceremony Button */}
+              {canControl && (
+                <motion.div
+                  className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.5 }}
+                >
+                  <Button
+                    onClick={() => setShowAwardCeremony(true)}
+                    className="px-6 py-3 text-base font-bold rounded-full shadow-xl"
+                    style={{
+                      background: 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)',
+                      color: '#1a1a2e',
+                    }}
+                  >
+                    <IconTrophy size={20} state="active" className="mr-2" />
+                    {t('competition.replayCeremony', '重播颁奖典礼')}
+                  </Button>
+                </motion.div>
+              )}
+            </div>
           )}
         </div>
 
@@ -1109,6 +1228,22 @@ export function CompetitionLivePage() {
           </span>
         </div>
       )}
+
+      {/* Award Ceremony Overlay */}
+      <AnimatePresence>
+        {showAwardCeremony && currentPhase === 'finished' && (
+          <AwardCeremony
+            winners={leaderboard.slice(0, 10).map(entry => ({
+              rank: entry.rank,
+              name: entry.nickname,
+              score: entry.totalScore,
+              participantId: entry.participantId,
+            }))}
+            competitionName={competition.name}
+            onClose={() => setShowAwardCeremony(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1147,12 +1282,18 @@ function LeaderboardSidebar({
       </p>
 
       <div className="flex-1 space-y-2 overflow-auto">
+        <AnimatePresence mode="popLayout">
         {participantMode === 'team' && teamLeaderboard.length > 0
           ? teamLeaderboard.map((entry) => {
               const isSelected = selectedTarget?.type === 'team' && selectedTarget?.id === entry.team.id;
               return (
-                <button
+                <motion.button
                   key={entry.team.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                   onClick={() => onSelectTarget({
                     type: 'team',
                     id: entry.team.id,
@@ -1160,7 +1301,7 @@ function LeaderboardSidebar({
                     score: entry.team.totalScore,
                   })}
                   className={cn(
-                    'flex w-full items-center gap-3 rounded-lg p-3 text-left transition-all',
+                    'flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors',
                     isSelected && 'ring-2'
                   )}
                   style={{
@@ -1170,12 +1311,13 @@ function LeaderboardSidebar({
                     '--tw-ring-color': colors.primary,
                   }}
                 >
-                  <span
+                  <motion.span
+                    layout
                     className="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold text-white"
                     style={{ backgroundColor: entry.team.color }}
                   >
                     {entry.rank}
-                  </span>
+                  </motion.span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium" style={{ color: colors.text }}>
                       {entry.team.name}
@@ -1184,17 +1326,27 @@ function LeaderboardSidebar({
                       {entry.team.members?.length || 0} {t('simulation.members', '成员')}
                     </p>
                   </div>
-                  <span className="text-lg font-bold" style={{ color: colors.primary }}>
+                  <motion.span
+                    key={entry.team.totalScore}
+                    initial={{ scale: 1.3, color: '#22c55e' }}
+                    animate={{ scale: 1, color: colors.primary }}
+                    className="text-lg font-bold"
+                  >
                     {entry.team.totalScore}
-                  </span>
-                </button>
+                  </motion.span>
+                </motion.button>
               );
             })
           : leaderboard.map((entry) => {
               const isSelected = selectedTarget?.type === 'participant' && selectedTarget?.id === entry.participantId;
               return (
-                <button
+                <motion.button
                   key={entry.participantId}
+                  layout
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                   onClick={() => onSelectTarget({
                     type: 'participant',
                     id: entry.participantId,
@@ -1202,7 +1354,7 @@ function LeaderboardSidebar({
                     score: entry.totalScore,
                   })}
                   className={cn(
-                    'flex w-full items-center gap-3 rounded-lg p-3 text-left transition-all',
+                    'flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors',
                     isSelected && 'ring-2'
                   )}
                   style={{
@@ -1211,7 +1363,8 @@ function LeaderboardSidebar({
                     '--tw-ring-color': colors.primary,
                   }}
                 >
-                  <span
+                  <motion.span
+                    layout
                     className="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold"
                     style={{
                       backgroundColor:
@@ -1220,7 +1373,7 @@ function LeaderboardSidebar({
                     }}
                   >
                     {entry.rank}
-                  </span>
+                  </motion.span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium" style={{ color: colors.text }}>
                       {entry.nickname}
@@ -1229,12 +1382,18 @@ function LeaderboardSidebar({
                       {entry.correctCount} {t('competition.correct', '正确')}
                     </p>
                   </div>
-                  <span className="text-lg font-bold" style={{ color: colors.primary }}>
+                  <motion.span
+                    key={entry.totalScore}
+                    initial={{ scale: 1.3, color: '#22c55e' }}
+                    animate={{ scale: 1, color: colors.primary }}
+                    className="text-lg font-bold"
+                  >
                     {entry.totalScore}
-                  </span>
-                </button>
+                  </motion.span>
+                </motion.button>
               );
             })}
+        </AnimatePresence>
 
         {leaderboard.length === 0 && teamLeaderboard.length === 0 && (
           <div className="py-8 text-center text-sm" style={{ color: colors.text + '60' }}>
@@ -2397,6 +2556,14 @@ function PauseIcon({ className, style }: IconProps) {
     <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="6" y="4" width="4" height="16" />
       <rect x="14" y="4" width="4" height="16" />
+    </svg>
+  );
+}
+
+function StopIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="2" />
     </svg>
   );
 }

@@ -13,13 +13,8 @@ const getUserOrIpKey = (req: Request): string => {
   }
 
   // Fall back to IP for unauthenticated requests
-  // Trust X-Forwarded-For header from nginx proxy
-  const forwarded = req.headers['x-forwarded-for'];
-  const ip = typeof forwarded === 'string'
-    ? forwarded.split(',')[0].trim()
-    : req.ip || req.socket.remoteAddress || 'unknown';
-
-  return `ip:${ip}`;
+  // Use req.ip which express-rate-limit handles properly
+  return `ip:${req.ip || 'unknown'}`;
 };
 
 // General rate limiter for all requests
@@ -31,6 +26,7 @@ export const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getUserOrIpKey,
+  validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false },
   skip: (req: Request) => {
     // Skip rate limiting for WebSocket upgrade requests
     return req.headers.upgrade === 'websocket';
@@ -56,6 +52,7 @@ export const strictLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getUserOrIpKey,
+  validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false },
 });
 
 // Competition-specific limiter with higher limits
@@ -67,6 +64,7 @@ export const competitionLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getUserOrIpKey,
+  validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false },
   skip: (req: Request) => {
     // Skip for WebSocket connections
     return req.headers.upgrade === 'websocket';

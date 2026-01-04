@@ -70,6 +70,7 @@
   "common": {
     "cancel": "取消",
     "save": "保存",
+    "saveSettings": "保存设置",
     "search": "搜索",
     "previous": "上一页",
     "next": "下一页",
@@ -273,6 +274,11 @@
     "question": "题目",
     "noQuestions": "暂未添加题目",
     "manageQuestions": "管理题目",
+    "manageReferees": "管理裁判",
+    "currentQuestions": "当前题目",
+    "addQuestions": "添加题目",
+    "goToProblemBank": "前往题库",
+    "readOnly": "只读",
     "deleteConfirm": "确定删除比赛？",
     "deleteWarning": "此操作无法撤销。",
     "startHost": "开始主持",
@@ -571,6 +577,11 @@
           "description": "比赛结束，显示最终结果"
         }
       },
+      "awardCeremony": "颁奖典礼",
+      "startCeremony": "开始颁奖典礼",
+      "replayCeremony": "重播颁奖典礼",
+      "preparingResults": "准备揭晓结果...",
+      "honorableMentions": "荣誉榜",
       "phase": {
         "intro": "介绍",
         "setup": "设置",
@@ -756,6 +767,7 @@
     "currentQuestion": "当前题目",
     "startFirstQuestion": "开始第一题",
     "revealAnswer": "公布答案",
+    "endQuestion": "结束答题",
     "showLeaderboard": "显示排行榜",
     "teams": "团队",
     "previewButton": "预览",
@@ -818,6 +830,8 @@
         "pauseCompetitionDesc": "可以暂停正在进行的比赛"
       },
       "manage": "管理裁判",
+      "noReferees": "暂无裁判",
+      "added": "裁判已添加",
       "addByEmail": "通过邮箱添加裁判",
       "emailPlaceholder": "输入裁判邮箱地址",
       "addNote": "用户必须有此邮箱的注册账号",

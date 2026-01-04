@@ -43,6 +43,19 @@ interface AuthenticatedSocket extends Socket {
   role?: 'host' | 'participant' | 'referee' | 'display';
 }
 
+// Map backend problem types to frontend display types
+const mapProblemType = (backendType: string): string => {
+  const typeMap: Record<string, string> = {
+    'single_choice': 'choice',
+    'multiple_choice': 'choice',
+    'fill_blank': 'blank',
+    'integration': 'integral',
+    'short_answer': 'answer',
+    'proof': 'answer',
+  };
+  return typeMap[backendType] || 'blank';
+};
+
 // Room naming conventions
 const getRooms = (competitionId: string) => ({
   all: `competition:${competitionId}`,
@@ -435,7 +448,7 @@ export function setupCompetitionSocket(io: Server): void {
               ? {
                   id: q.problemId._id,
                   content: q.problemId.content,
-                  type: q.problemId.type,
+                  type: mapProblemType(q.problemId.type),
                   options: q.problemId.options,
                   correctAnswer: q.problemId.correctAnswer,
                 }
@@ -535,7 +548,7 @@ export function setupCompetitionSocket(io: Server): void {
             problem: q.problemId ? {
               id: q.problemId._id,
               content: q.problemId.content,
-              type: q.problemId.type,
+              type: mapProblemType(q.problemId.type),
               options: q.problemId.options,
             } : null,
           })),
@@ -624,7 +637,7 @@ export function setupCompetitionSocket(io: Server): void {
               ? {
                   id: q.problemId._id,
                   content: q.problemId.content,
-                  type: q.problemId.type,
+                  type: mapProblemType(q.problemId.type),
                   options: q.problemId.options,
                   correctAnswer: q.problemId.correctAnswer,
                 }
@@ -916,7 +929,7 @@ export function setupCompetitionSocket(io: Server): void {
           // Clear any existing countdown for this competition
           clearCountdown(competitionId);
 
-          // After countdown (3 seconds), show question
+          // After brief countdown (1.5 seconds), show question
           const countdownTimeout = setTimeout(async () => {
             // Remove from active countdowns since it's executing
             activeCountdowns.delete(competitionId);
@@ -930,7 +943,7 @@ export function setupCompetitionSocket(io: Server): void {
               questionId: question._id,
               order: question.order,
               content: problem.content,
-              type: problem.type,
+              type: mapProblemType(problem.type),
               options: problem.options,
               timeLimit,
               points: question.points || competition?.settings.basePoints,
@@ -939,7 +952,7 @@ export function setupCompetitionSocket(io: Server): void {
 
             // Start timer
             await timerService.startTimer(competitionId, question.order, timeLimit);
-          }, 3000);
+          }, 1500);
 
           // Store the timeout so it can be cancelled if needed
           activeCountdowns.set(competitionId, countdownTimeout);
@@ -996,7 +1009,7 @@ export function setupCompetitionSocket(io: Server): void {
           questionId: question._id,
           order: question.order,
           content: problem.content,
-          type: problem.type,
+          type: mapProblemType(problem.type),
           options: problem.options,
           timeLimit,
           points: question.points || competition?.settings.basePoints,
@@ -1087,17 +1100,20 @@ export function setupCompetitionSocket(io: Server): void {
 
         if (question && question.problemId) {
           const rooms = getRooms(competitionId);
+          // Use displayAnswer (symbolic/LaTeX) if available, otherwise fall back to correctAnswer
+          const problem = question.problemId as any;
+          const answerToShow = problem.displayAnswer || problem.correctAnswer;
           competitionNamespace.to(rooms.all).emit('answer:revealed', {
             questionId,
-            correctAnswer: question.problemId.correctAnswer,
-            explanation: question.problemId.answerExplanation,
+            correctAnswer: answerToShow,
+            explanation: problem.answerExplanation,
             phase: 'revealing',
           });
 
           // Send updated leaderboard
           const leaderboard = await competitionService.getLeaderboard(competitionId);
           competitionNamespace.to(rooms.all).emit('leaderboard:update', {
-            leaderboard: leaderboard.map((p, i) => ({
+            individual: leaderboard.map((p, i) => ({
               rank: i + 1,
               participantId: p._id,
               nickname: p.nickname,
@@ -1590,8 +1606,9 @@ export function setupCompetitionSocket(io: Server): void {
           return;
         }
 
-        const isHost = competition.hostId.toString() === socket.userId;
-        const isReferee = await competitionService.isReferee(competitionId, socket.userId);
+        // Check if user is host (by socket role or by competition hostId)
+        const isHost = socket.role === 'host' || competition.hostId.toString() === socket.userId;
+        const isReferee = socket.role === 'referee' || await competitionService.isReferee(competitionId, socket.userId);
 
         if (!isHost && !isReferee) {
           socket.emit('error', { message: 'Not authorized' });
@@ -1676,8 +1693,9 @@ export function setupCompetitionSocket(io: Server): void {
           return;
         }
 
-        const isHost = competition.hostId.toString() === socket.userId;
-        const isReferee = await competitionService.isReferee(competitionId, socket.userId);
+        // Check if user is host (by socket role or by competition hostId)
+        const isHost = socket.role === 'host' || competition.hostId.toString() === socket.userId;
+        const isReferee = socket.role === 'referee' || await competitionService.isReferee(competitionId, socket.userId);
 
         if (!isHost && !isReferee) {
           socket.emit('error', { message: 'Not authorized' });

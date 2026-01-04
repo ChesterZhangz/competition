@@ -309,11 +309,14 @@ export function ProblemCreatePage() {
         : 'fill_blank';
 
       let finalAnswer: string | string[];
+      let displayAnswerValue: string | undefined;
       if (type === 'choice') {
         finalAnswer = correctAnswers.length === 1 ? correctAnswers[0] : correctAnswers;
       } else {
         if (parsedFillBlankAnswer?.success && parsedFillBlankAnswer.value !== undefined) {
+          // Store numeric value for grading, but keep original LaTeX for display
           finalAnswer = parsedFillBlankAnswer.value.toString();
+          displayAnswerValue = fillBlankAnswer.trim(); // Preserve original LaTeX
         } else {
           finalAnswer = fillBlankAnswer.trim();
         }
@@ -331,6 +334,7 @@ export function ProblemCreatePage() {
         content: content.trim(),
         options: validOptions,
         correctAnswer: finalAnswer,
+        displayAnswer: displayAnswerValue, // Symbolic LaTeX answer for display
         answerExplanation: answerExplanation.trim() || undefined,
         source: source.trim() || undefined,
         points,

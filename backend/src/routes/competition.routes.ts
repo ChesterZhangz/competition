@@ -5,6 +5,9 @@ import { strictLimiter } from '../middlewares/rate-limiters';
 
 const router = Router();
 
+// User search for referee autocomplete (must be before :id routes)
+router.get('/users/search', authenticate, competitionController.searchUsers.bind(competitionController));
+
 // Competition CRUD
 router.post('/', authenticate, competitionController.create.bind(competitionController));
 router.get('/', authenticate, competitionController.list.bind(competitionController));

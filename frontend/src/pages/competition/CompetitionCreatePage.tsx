@@ -48,21 +48,8 @@ export function CompetitionCreatePage() {
   // Display settings
   const [displaySettings, setDisplaySettings] = useState<CompetitionDisplaySettings>(DEFAULT_DISPLAY_SETTINGS);
 
-  // Referee settings
-  const [refereeEnabled, setRefereeEnabled] = useState(false);
-  const [maxReferees, setMaxReferees] = useState(3);
-  const [refereePermissions, setRefereePermissions] = useState<string[]>(['manual_judge', 'add_comment', 'extend_time']);
-
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-
-  const toggleRefereePermission = (permission: string) => {
-    setRefereePermissions((prev) =>
-      prev.includes(permission)
-        ? prev.filter((p) => p !== permission)
-        : [...prev, permission]
-    );
-  };
 
   const handleLayoutChange = (layout: LayoutType) => {
     setDisplaySettings((prev) => ({
@@ -108,11 +95,6 @@ export function CompetitionCreatePage() {
           }),
         },
         displaySettings,
-        refereeSettings: {
-          enabled: refereeEnabled,
-          maxReferees,
-          permissions: refereePermissions,
-        },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
       addCompetition(newCompetition);
@@ -505,126 +487,6 @@ export function CompetitionCreatePage() {
               </label>
             </div>
           </div>
-        </GlassCard>
-
-        {/* Referee Settings */}
-        <GlassCard className="p-6">
-          <h2 className="mb-4 text-lg font-semibold">{t('competition.referee.title', 'Referee Settings')}</h2>
-
-          <label className="flex cursor-pointer items-center gap-3 mb-4">
-            <input
-              type="checkbox"
-              checked={refereeEnabled}
-              onChange={(e) => setRefereeEnabled(e.target.checked)}
-              className="h-4 w-4 accent-[var(--color-primary)]"
-            />
-            <span className="text-sm font-medium">
-              {t('competition.referee.enable', 'Enable referees for this competition')}
-            </span>
-          </label>
-
-          {refereeEnabled && (
-            <div className="space-y-4 rounded-lg bg-[var(--color-secondary)] p-4">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium">
-                  {t('competition.referee.maxCount', 'Maximum Referees')}
-                </label>
-                <Input
-                  type="number"
-                  value={maxReferees}
-                  onChange={(e) => setMaxReferees(Math.max(1, Math.min(10, parseInt(e.target.value) || 3)))}
-                  min={1}
-                  max={10}
-                />
-                <p className="text-xs text-[var(--color-muted)]">
-                  {t('competition.referee.maxCountHint', 'You can add referees after creating the competition')}
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-medium">
-                  {t('competition.referee.permissions', 'Referee Permissions')}
-                </label>
-
-                <div className="space-y-2">
-                  <label className="flex cursor-pointer items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={refereePermissions.includes('manual_judge')}
-                      onChange={() => toggleRefereePermission('manual_judge')}
-                      className="h-4 w-4 accent-[var(--color-primary)]"
-                    />
-                    <div>
-                      <span className="text-sm">{t('competition.referee.perm.manualJudge', 'Manual Judge')}</span>
-                      <p className="text-xs text-[var(--color-muted)]">
-                        {t('competition.referee.perm.manualJudgeDesc', 'Manually mark answers as correct or incorrect')}
-                      </p>
-                    </div>
-                  </label>
-
-                  <label className="flex cursor-pointer items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={refereePermissions.includes('override_score')}
-                      onChange={() => toggleRefereePermission('override_score')}
-                      className="h-4 w-4 accent-[var(--color-primary)]"
-                    />
-                    <div>
-                      <span className="text-sm">{t('competition.referee.perm.overrideScore', 'Override Score')}</span>
-                      <p className="text-xs text-[var(--color-muted)]">
-                        {t('competition.referee.perm.overrideScoreDesc', 'Change participant scores after submission')}
-                      </p>
-                    </div>
-                  </label>
-
-                  <label className="flex cursor-pointer items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={refereePermissions.includes('add_comment')}
-                      onChange={() => toggleRefereePermission('add_comment')}
-                      className="h-4 w-4 accent-[var(--color-primary)]"
-                    />
-                    <div>
-                      <span className="text-sm">{t('competition.referee.perm.addComment', 'Add Comments')}</span>
-                      <p className="text-xs text-[var(--color-muted)]">
-                        {t('competition.referee.perm.addCommentDesc', 'Add comments to participant submissions')}
-                      </p>
-                    </div>
-                  </label>
-
-                  <label className="flex cursor-pointer items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={refereePermissions.includes('extend_time')}
-                      onChange={() => toggleRefereePermission('extend_time')}
-                      className="h-4 w-4 accent-[var(--color-primary)]"
-                    />
-                    <div>
-                      <span className="text-sm">{t('competition.referee.perm.extendTime', 'Extend Time')}</span>
-                      <p className="text-xs text-[var(--color-muted)]">
-                        {t('competition.referee.perm.extendTimeDesc', 'Extend question time limits')}
-                      </p>
-                    </div>
-                  </label>
-
-                  <label className="flex cursor-pointer items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={refereePermissions.includes('pause_competition')}
-                      onChange={() => toggleRefereePermission('pause_competition')}
-                      className="h-4 w-4 accent-[var(--color-primary)]"
-                    />
-                    <div>
-                      <span className="text-sm">{t('competition.referee.perm.pauseCompetition', 'Pause Competition')}</span>
-                      <p className="text-xs text-[var(--color-muted)]">
-                        {t('competition.referee.perm.pauseCompetitionDesc', 'Pause and resume the competition')}
-                      </p>
-                    </div>
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
         </GlassCard>
 
         {/* Actions */}

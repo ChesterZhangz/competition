@@ -937,6 +937,30 @@ export class CompetitionController {
       next(error);
     }
   }
+
+  // GET /api/competitions/users/search?q=query
+  async searchUsers(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
+        return;
+      }
+
+      // Only teachers and admins can search users
+      const role = req.user?.role;
+      if (role !== 'teacher' && role !== 'admin' && role !== 'super_admin') {
+        res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Not authorized' } });
+        return;
+      }
+
+      const query = req.query.q as string || '';
+      const users = await competitionService.searchUsers(query, 10);
+      res.json({ success: true, data: users });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const competitionController = new CompetitionController();
