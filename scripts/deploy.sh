@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Deployment Script for Math Competition Platform
-# Server: competition.mareate.com
+# Server: www.mareate.com
 
 set -e
 

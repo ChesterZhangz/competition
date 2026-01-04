@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # SSL Certificate Initialization Script for Let's Encrypt
-# Domain: competition.mareate.com
+# Domain: www.mareate.com
 
 set -e
 
-DOMAIN="competition.mareate.com"
+DOMAIN="www.mareate.com"
 EMAIL="admin@mareate.com"  # Change this to your email
 STAGING=0  # Set to 1 for testing (to avoid rate limits)
 
