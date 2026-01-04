@@ -84,6 +84,14 @@ export function CompetitionRefereePage() {
       if (!id) return;
       try {
         const result = await competitionApi.checkRefereeStatus(id);
+
+        // Check if referee feature is enabled
+        if (!result.refereeEnabled) {
+          setError(t('competition.referee.featureDisabled', 'Referee feature is not enabled for this competition'));
+          setIsLoading(false);
+          return;
+        }
+
         setIsReferee(result.isReferee);
         setPermissions(result.permissions);
         if (!result.isReferee) {

@@ -307,7 +307,7 @@ export const competitionApi = {
     return del(`/competitions/${competitionId}/referees/${refereeUserId}`);
   },
 
-  checkRefereeStatus: (competitionId: string): Promise<{ isReferee: boolean; permissions: RefereePermission[] }> => {
+  checkRefereeStatus: (competitionId: string): Promise<{ isReferee: boolean; refereeEnabled: boolean; permissions: RefereePermission[] }> => {
     return get(`/competitions/${competitionId}/referee/check`);
   },
 

@@ -792,14 +792,34 @@ export class CompetitionController {
         return;
       }
 
-      const isReferee = await competitionService.isReferee(req.params.id, userId);
       const competition = await competitionService.getById(req.params.id);
+      if (!competition) {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Competition not found' } });
+        return;
+      }
+
+      // Check if referee feature is enabled
+      const refereeEnabled = competition.settings.refereeSettings?.enabled === true;
+      if (!refereeEnabled) {
+        res.json({
+          success: true,
+          data: {
+            isReferee: false,
+            refereeEnabled: false,
+            permissions: [],
+          },
+        });
+        return;
+      }
+
+      const isReferee = await competitionService.isReferee(req.params.id, userId);
 
       res.json({
         success: true,
         data: {
           isReferee,
-          permissions: isReferee ? competition?.settings.refereeSettings?.permissions || [] : [],
+          refereeEnabled: true,
+          permissions: isReferee ? competition.settings.refereeSettings?.permissions || [] : [],
         },
       });
     } catch (error) {

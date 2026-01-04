@@ -566,6 +566,12 @@ export function setupCompetitionSocket(io: Server): void {
           return;
         }
 
+        // Check if referee feature is enabled for this competition
+        if (!competition.settings.refereeSettings?.enabled) {
+          socket.emit('error', { message: 'Referee feature is not enabled for this competition' });
+          return;
+        }
+
         // Check if user is a referee for this competition
         const isReferee = await competitionService.isReferee(competitionId, socket.userId);
         if (!isReferee) {
@@ -1592,8 +1598,12 @@ export function setupCompetitionSocket(io: Server): void {
           return;
         }
 
-        // If referee, check permission
+        // If referee (not host), check if referee feature is enabled and has permission
         if (isReferee && !isHost) {
+          if (!competition.settings.refereeSettings?.enabled) {
+            socket.emit('error', { message: 'Referee feature is not enabled' });
+            return;
+          }
           const hasPermission = await competitionService.hasRefereePermission(competitionId, socket.userId, 'override_score');
           if (!hasPermission) {
             socket.emit('error', { message: 'No permission to override scores' });
@@ -1672,6 +1682,14 @@ export function setupCompetitionSocket(io: Server): void {
         if (!isHost && !isReferee) {
           socket.emit('error', { message: 'Not authorized' });
           return;
+        }
+
+        // If referee (not host), check if referee feature is enabled
+        if (isReferee && !isHost) {
+          if (!competition.settings.refereeSettings?.enabled) {
+            socket.emit('error', { message: 'Referee feature is not enabled' });
+            return;
+          }
         }
 
         // Get participant and add bonus

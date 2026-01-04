@@ -112,6 +112,7 @@ export function CompetitionLivePage() {
   const [teamCount, setTeamCount] = useState(0);
   const [countdownValue, setCountdownValue] = useState(3);
   const [isPaused, setIsPaused] = useState(false);
+  const [errorNotification, setErrorNotification] = useState<string | null>(null);
 
   // Score adjustment state
   const [showScorePanel, setShowScorePanel] = useState(false);
@@ -253,11 +254,23 @@ export function CompetitionLivePage() {
 
       socket.on('error', (data: { message: string }) => {
         console.error('Live page socket error:', data.message);
-        // If join failed (not authorized as host), fall back to display mode
+        // If join failed (not authorized as host/referee), fall back to display mode
         if (userRole !== 'display') {
           console.log('Falling back to display mode');
           setUserRole('display');
           socket.emit('join:display', { competitionId: id });
+
+          // Show notification about why fallback happened
+          if (data.message.includes('Referee feature is not enabled')) {
+            setErrorNotification(t('competition.referee.featureDisabled', 'Referee feature is not enabled for this competition'));
+          } else if (data.message.includes('not a referee')) {
+            setErrorNotification(t('competition.referee.notAuthorized', 'You are not authorized as a referee'));
+          } else if (data.message.includes('not the host')) {
+            setErrorNotification(t('competition.notHost', 'You are not the host of this competition'));
+          }
+
+          // Auto-dismiss notification after 5 seconds
+          setTimeout(() => setErrorNotification(null), 5000);
         }
       });
 
@@ -781,6 +794,33 @@ export function CompetitionLivePage() {
                 {t('competition.pausedHint', '请等待主持人继续比赛...')}
               </p>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Error Notification */}
+      <AnimatePresence>
+        {errorNotification && (
+          <motion.div
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-lg bg-red-500 px-6 py-3 text-white shadow-lg"
+          >
+            <div className="flex items-center gap-3">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span>{errorNotification}</span>
+              <button
+                onClick={() => setErrorNotification(null)}
+                className="ml-2 hover:opacity-80"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
