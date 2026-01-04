@@ -773,6 +773,7 @@
     "waitingForReveal": "Waiting for host to reveal the answer...",
     "answerRevealed": "Answer Revealed",
     "correctAnswer": "Correct Answer",
+    "backToQuestion": "Back to Question",
     "referee": {
       "title": "Referee Settings",
       "enable": "Enable Referees",

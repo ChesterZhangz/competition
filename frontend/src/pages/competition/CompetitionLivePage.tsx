@@ -525,6 +525,13 @@ export function CompetitionLivePage() {
         setTimerState({ remainingTime: remainingSeconds, isRunning: false, totalDuration: totalSeconds });
       });
 
+      // Timer adjusted (when host adds/removes time)
+      socket.on('timer:adjusted', (data: { remainingTime: number; adjustment: number }) => {
+        const remainingSeconds = Math.ceil(data.remainingTime / 1000);
+        console.log('Timer adjusted:', data.adjustment / 1000, 'seconds, new remaining:', remainingSeconds);
+        setTimerState(prev => ({ ...prev, remainingTime: remainingSeconds }));
+      });
+
       socket.on('timer:ended', (data: { phase?: string }) => {
         setTimerState(prev => ({ ...prev, remainingTime: 0, isRunning: false }));
         // When timer ends, automatically switch to revealing phase (hide question, show "time's up")
@@ -636,6 +643,14 @@ export function CompetitionLivePage() {
   const handleShowLeaderboard = useCallback(() => {
     if (socketRef.current && userRole === 'host') {
       socketRef.current.emit('leaderboard:toggle', { competitionId: id, visible: true });
+    }
+  }, [id, userRole]);
+
+  const handleBackToQuestion = useCallback(() => {
+    if (socketRef.current && userRole === 'host') {
+      // Emit phase change to go back to question
+      socketRef.current.emit('phase:change', { competitionId: id, phase: 'question' });
+      setCurrentPhase('question');
     }
   }, [id, userRole]);
 
@@ -936,16 +951,31 @@ export function CompetitionLivePage() {
                 </Button>
               )}
 
-              {/* Show Leaderboard */}
-              <Button
-                onClick={handleShowLeaderboard}
-                size="sm"
-                variant="outline"
-                style={{ borderColor: colors.secondary, color: colors.text }}
-              >
-                <IconTrophy size={16} className="mr-1" />
-                {t('competition.showLeaderboard', '排行榜')}
-              </Button>
+              {/* Show Leaderboard - only when not on leaderboard */}
+              {currentPhase !== 'leaderboard' && (
+                <Button
+                  onClick={handleShowLeaderboard}
+                  size="sm"
+                  variant="outline"
+                  style={{ borderColor: colors.secondary, color: colors.text }}
+                >
+                  <IconTrophy size={16} className="mr-1" />
+                  {t('competition.showLeaderboard', '排行榜')}
+                </Button>
+              )}
+
+              {/* Back to Question - when on leaderboard or revealing */}
+              {(currentPhase === 'leaderboard' || currentPhase === 'revealing') && (
+                <Button
+                  onClick={handleBackToQuestion}
+                  size="sm"
+                  variant="outline"
+                  style={{ borderColor: colors.primary, color: colors.primary }}
+                >
+                  <BackIcon className="mr-1 h-4 w-4" />
+                  {t('competition.backToQuestion', '返回题目')}
+                </Button>
+              )}
 
               {/* Next Question */}
               <Button
@@ -2002,6 +2032,14 @@ function HostIcon({ className, style }: IconProps) {
       <path d="M12 2L2 7l10 5 10-5-10-5z" />
       <path d="M2 17l10 5 10-5" />
       <path d="M2 12l10 5 10-5" />
+    </svg>
+  );
+}
+
+function BackIcon({ className, style }: IconProps) {
+  return (
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 18 9 12 15 6" />
     </svg>
   );
 }

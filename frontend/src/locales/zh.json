@@ -773,6 +773,7 @@
     "waitingForReveal": "等待主持人公布答案...",
     "answerRevealed": "答案公布",
     "correctAnswer": "正确答案",
+    "backToQuestion": "返回题目",
     "referee": {
       "title": "裁判设置",
       "enable": "启用裁判",
