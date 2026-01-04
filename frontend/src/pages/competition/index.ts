@@ -1,0 +1,13 @@
+export { CompetitionsPage } from './CompetitionsPage';
+export { JoinCompetitionPage } from './JoinCompetitionPage';
+export { CompetitionCreatePage } from './CompetitionCreatePage';
+export { CompetitionDetailPage } from './CompetitionDetailPage';
+export { CompetitionEditPage } from './CompetitionEditPage';
+export { CompetitionHostPage } from './CompetitionHostPage';
+export { CompetitionLivePage } from './CompetitionLivePage';
+export { CompetitionPlayPage } from './CompetitionPlayPage';
+export { CompetitionResultsPage } from './CompetitionResultsPage';
+export { CompetitionPreviewPage } from './CompetitionPreviewPage';
+export { CompetitionDemoPage } from './CompetitionDemoPage';
+export { CompetitionRefereePage } from './CompetitionRefereePage';
+export { CompetitionTutorialPage } from './CompetitionTutorialPage';

@@ -1,0 +1,8 @@
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "description": "Shared types for Math Competition Platform",
+  "main": "types/index.ts",
+  "types": "types/index.ts",
+  "scripts": {}
+}
