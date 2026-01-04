@@ -9,11 +9,46 @@ const competitionSettingsSchema = z.object({
   penaltyForWrong: z.boolean().optional(),
   penaltyPoints: z.number().nonnegative().optional(),
   showLeaderboard: z.boolean().optional(),
+  showLeaderboardDuringQuestion: z.boolean().optional(),
   showCorrectAnswer: z.boolean().optional(),
   showAnswerAfterTime: z.boolean().optional(),
   maxParticipants: z.number().positive().optional(),
   allowLateJoin: z.boolean().optional(),
   requireNickname: z.boolean().optional(),
+  participantMode: z.enum(['individual', 'team']).optional(),
+  teamSize: z.number().positive().optional(),
+  minTeamSize: z.number().positive().optional(),
+  teamRoleMode: z.string().optional(),
+}).optional();
+
+const refereeSettingsSchema = z.object({
+  enabled: z.boolean(),
+  maxReferees: z.number().positive().max(10).optional(),
+  permissions: z.array(z.enum([
+    'manual_judge',
+    'override_score',
+    'add_comment',
+    'extend_time',
+    'pause_competition',
+    'skip_question',
+  ])).optional(),
+}).optional();
+
+const displaySettingsSchema = z.object({
+  layout: z.enum(['single', 'grid', 'list']).optional(),
+  theme: z.object({
+    primary: z.string().optional(),
+    secondary: z.string().optional(),
+    accent: z.string().optional(),
+    background: z.string().optional(),
+    text: z.string().optional(),
+  }).optional(),
+  showTimer: z.boolean().optional(),
+  showProgress: z.boolean().optional(),
+  showLeaderboard: z.boolean().optional(),
+  showParticipantCount: z.boolean().optional(),
+  questionsPerPage: z.number().positive().optional(),
+  animationSpeed: z.enum(['slow', 'normal', 'fast']).optional(),
 }).optional();
 
 export const createCompetitionSchema = z.object({
@@ -21,7 +56,10 @@ export const createCompetitionSchema = z.object({
   description: z.string().max(500).optional(),
   type: z.enum(['integration_bee', 'fun_math', 'quiz', 'speed_math']),
   mode: z.enum(['onsite', 'online']),
+  participantMode: z.enum(['individual', 'team']).optional(),
   settings: competitionSettingsSchema,
+  displaySettings: displaySettingsSchema,
+  refereeSettings: refereeSettingsSchema,
   scheduledStartTime: z.string().datetime().optional(),
 });
 

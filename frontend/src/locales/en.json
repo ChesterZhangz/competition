@@ -788,6 +788,8 @@
       "enable": "Enable Referees",
       "enableDesc": "Allow referees to monitor and judge submissions",
       "maxReferees": "Maximum Referees",
+      "maxCount": "Maximum Referees",
+      "maxCountHint": "You can add referees after creating the competition",
       "permissions": "Referee Permissions",
       "permission": {
         "overrideScore": "Override Score",
@@ -802,6 +804,18 @@
         "skipQuestionDesc": "Can skip the current question",
         "extendTime": "Extend Time",
         "extendTimeDesc": "Can extend the answer time"
+      },
+      "perm": {
+        "manualJudge": "Manual Judge",
+        "manualJudgeDesc": "Manually mark answers as correct or incorrect",
+        "overrideScore": "Override Score",
+        "overrideScoreDesc": "Change participant scores after submission",
+        "addComment": "Add Comments",
+        "addCommentDesc": "Add comments to participant submissions",
+        "extendTime": "Extend Time",
+        "extendTimeDesc": "Extend question time limits",
+        "pauseCompetition": "Pause Competition",
+        "pauseCompetitionDesc": "Pause and resume the competition"
       },
       "manage": "Manage Referees",
       "addByEmail": "Add Referee by Email",

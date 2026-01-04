@@ -68,6 +68,14 @@ export class CompetitionService {
         allowLateJoin: true,
         requireNickname: true,
         ...input.settings,
+        // Include refereeSettings if provided
+        ...(input.refereeSettings && {
+          refereeSettings: {
+            enabled: input.refereeSettings.enabled || false,
+            maxReferees: input.refereeSettings.maxReferees || 3,
+            permissions: input.refereeSettings.permissions || [],
+          },
+        }),
       },
     });
 

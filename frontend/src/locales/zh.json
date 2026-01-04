@@ -788,6 +788,8 @@
       "enable": "启用裁判",
       "enableDesc": "允许裁判监控和评判提交",
       "maxReferees": "最大裁判数",
+      "maxCount": "最大裁判数",
+      "maxCountHint": "可以在创建比赛后添加裁判",
       "permissions": "裁判权限",
       "permission": {
         "overrideScore": "修改分数",
@@ -802,6 +804,18 @@
         "skipQuestionDesc": "可以跳过当前题目",
         "extendTime": "延长时间",
         "extendTimeDesc": "可以延长答题时间"
+      },
+      "perm": {
+        "manualJudge": "手动评判",
+        "manualJudgeDesc": "可以手动判定答案正确与否",
+        "overrideScore": "修改分数",
+        "overrideScoreDesc": "可以修改参与者的分数",
+        "addComment": "添加评论",
+        "addCommentDesc": "可以对提交添加评论",
+        "extendTime": "延长时间",
+        "extendTimeDesc": "可以延长答题时间",
+        "pauseCompetition": "暂停比赛",
+        "pauseCompetitionDesc": "可以暂停正在进行的比赛"
       },
       "manage": "管理裁判",
       "addByEmail": "通过邮箱添加裁判",

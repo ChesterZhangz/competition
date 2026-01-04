@@ -184,8 +184,14 @@ export const competitionApi = {
     description?: string;
     type: string;
     mode: string;
+    participantMode?: string;
     settings?: Partial<Competition['settings']>;
     displaySettings?: CompetitionDisplaySettings;
+    refereeSettings?: {
+      enabled: boolean;
+      maxReferees: number;
+      permissions: string[];
+    };
   }): Promise<Competition> => {
     return post<Competition>('/competitions', data);
   },
