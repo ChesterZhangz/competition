@@ -28,6 +28,7 @@ import {
   timerAdjustSchema,
   phaseChangeSchema,
   leaderboardShowSchema,
+  leaderboardToggleSchema,
   teamCreateSchema,
   teamJoinSchema,
   teamUpdateRoleSchema,
@@ -1098,6 +1099,64 @@ export function setupCompetitionSocket(io: Server): void {
             })),
           });
         }
+      } catch (error) {
+        socket.emit('error', { message: (error as Error).message });
+      }
+    });
+
+    // Show/Hide Leaderboard (Host only)
+    socket.on('leaderboard:toggle', async (data: unknown) => {
+      try {
+        const validation = validateSocketData(leaderboardToggleSchema, data, 'leaderboard:toggle');
+        if (!validation.success) {
+          socket.emit('error', { message: validation.error });
+          return;
+        }
+        const { competitionId, visible } = validation.data;
+
+        if (!socket.userId || socket.role !== 'host') {
+          socket.emit('error', { message: 'Not authorized' });
+          return;
+        }
+
+        const competition = await competitionService.getById(competitionId);
+        if (!competition || !isAuthorizedHost(competition)) {
+          socket.emit('error', { message: 'Not authorized' });
+          return;
+        }
+
+        // Update phase to leaderboard if visible
+        if (visible) {
+          await Competition.updateOne(
+            { _id: competitionId },
+            { currentPhase: 'leaderboard' }
+          );
+
+          // Get and send leaderboard data
+          const leaderboard = await competitionService.getLeaderboard(competitionId);
+          const rooms = getRooms(competitionId);
+
+          competitionNamespace.to(rooms.all).emit('leaderboard:update', {
+            individual: leaderboard.map((p, i) => ({
+              rank: i + 1,
+              participantId: p._id,
+              nickname: p.nickname,
+              totalScore: p.totalScore,
+              correctCount: p.correctCount,
+            })),
+          });
+
+          // Broadcast phase change
+          competitionNamespace.to(rooms.all).emit('phase:changed', {
+            phase: 'leaderboard',
+          });
+        }
+
+        // Broadcast visibility toggle
+        const rooms = getRooms(competitionId);
+        competitionNamespace.to(rooms.all).emit('leaderboard:toggle', {
+          visible,
+        });
       } catch (error) {
         socket.emit('error', { message: (error as Error).message });
       }

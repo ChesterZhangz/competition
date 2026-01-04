@@ -105,6 +105,11 @@ export const leaderboardShowSchema = z.object({
   competitionId: objectIdSchema,
 });
 
+export const leaderboardToggleSchema = z.object({
+  competitionId: objectIdSchema,
+  visible: z.boolean(),
+});
+
 // Team schemas
 export const teamCreateSchema = z.object({
   name: z.string().min(1).max(50),

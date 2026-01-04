@@ -769,6 +769,10 @@
     "hostMode": "主持人模式",
     "refereeMode": "裁判模式",
     "refereeHint": "使用裁判控制台进行评分调整",
+    "timeUp": "时间到！",
+    "waitingForReveal": "等待主持人公布答案...",
+    "answerRevealed": "答案公布",
+    "correctAnswer": "正确答案",
     "referee": {
       "title": "裁判设置",
       "enable": "启用裁判",

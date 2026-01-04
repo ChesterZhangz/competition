@@ -769,6 +769,10 @@
     "hostMode": "Host Mode",
     "refereeMode": "Referee Mode",
     "refereeHint": "Use referee console for score adjustments",
+    "timeUp": "Time's Up!",
+    "waitingForReveal": "Waiting for host to reveal the answer...",
+    "answerRevealed": "Answer Revealed",
+    "correctAnswer": "Correct Answer",
     "referee": {
       "title": "Referee Settings",
       "enable": "Enable Referees",

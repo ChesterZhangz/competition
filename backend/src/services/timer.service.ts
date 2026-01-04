@@ -262,13 +262,14 @@ export class TimerService {
       await this.saveTimerState(state);
     }
 
-    // Update MongoDB
+    // Update MongoDB - also change phase to 'revealing' when timer ends
     await Competition.updateOne(
       { _id: competitionId },
       {
         $set: {
           'timerState.remainingTime': 0,
           'timerState.isRunning': false,
+          'currentPhase': 'revealing',
         },
       }
     );
@@ -276,8 +277,11 @@ export class TimerService {
     // Stop tick interval
     this.stopTickInterval(competitionId);
 
-    // Broadcast timer ended
-    this.broadcastTimerEvent(competitionId, 'timer:ended', {});
+    // Broadcast timer ended with phase change
+    this.broadcastTimerEvent(competitionId, 'timer:ended', { phase: 'revealing' });
+
+    // Also broadcast phase change separately for clients that listen to it
+    this.broadcastTimerEvent(competitionId, 'phase:changed', { phase: 'revealing' });
   }
 
   // Get current remaining time (accounting for elapsed time if running)

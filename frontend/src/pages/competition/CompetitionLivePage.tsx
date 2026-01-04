@@ -525,8 +525,14 @@ export function CompetitionLivePage() {
         setTimerState({ remainingTime: remainingSeconds, isRunning: false, totalDuration: totalSeconds });
       });
 
-      socket.on('timer:ended', () => {
+      socket.on('timer:ended', (data: { phase?: string }) => {
         setTimerState(prev => ({ ...prev, remainingTime: 0, isRunning: false }));
+        // When timer ends, automatically switch to revealing phase (hide question, show "time's up")
+        if (data?.phase) {
+          setCurrentPhase(data.phase as CompetitionPhase);
+        } else {
+          setCurrentPhase('revealing');
+        }
       });
 
       // Participant events
@@ -647,7 +653,8 @@ export function CompetitionLivePage() {
 
   const handleTimerAdjust = useCallback((seconds: number) => {
     if (socketRef.current && userRole === 'host') {
-      socketRef.current.emit('timer:adjust', { competitionId: id, seconds: seconds * 1000 });
+      // Backend expects 'adjustment' in milliseconds
+      socketRef.current.emit('timer:adjust', { competitionId: id, adjustment: seconds * 1000 });
     }
   }, [id, userRole]);
 
@@ -791,8 +798,8 @@ export function CompetitionLivePage() {
         )
       )}
 
-      {/* Answer Revealing */}
-      {currentPhase === 'revealing' && currentQuestion && (
+      {/* Answer Revealing / Time's Up */}
+      {currentPhase === 'revealing' && (
         <RevealingScreen
           question={currentQuestion}
           colors={colors}
@@ -1595,10 +1602,34 @@ function RevealingScreen({
   question,
   colors,
 }: {
-  question: CurrentQuestion;
+  question: CurrentQuestion | null;
   colors: CustomThemeColors;
 }) {
   const { t } = useTranslation();
+
+  // If no question or no correct answer, show "Time's Up" screen
+  if (!question || !question.correctAnswer) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center p-8">
+        {/* Time's Up Icon */}
+        <div
+          className="mb-8 flex h-32 w-32 items-center justify-center rounded-full"
+          style={{ backgroundColor: colors.accent + '20' }}
+        >
+          <svg className="h-16 w-16" style={{ color: colors.accent }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" strokeWidth="2" />
+            <polyline points="12 6 12 12 16 14" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <h2 className="mb-4 text-5xl font-bold" style={{ color: colors.accent }}>
+          {t('competition.timeUp', '时间到！')}
+        </h2>
+        <p className="text-2xl" style={{ color: colors.text + '80' }}>
+          {t('competition.waitingForReveal', '等待主持人公布答案...')}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-8">
