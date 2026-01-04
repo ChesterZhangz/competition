@@ -6,7 +6,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { config } from './config';
 
 // Import rate limiters
-import { generalLimiter, authLimiter } from './middlewares/rate-limiters';
+import { generalLimiter, authLimiter, competitionLimiter } from './middlewares/rate-limiters';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -29,6 +29,10 @@ export function createApp(): { app: Application; httpServer: HTTPServer; io: Soc
     },
   });
 
+  // Trust proxy - required for rate limiting behind nginx
+  // This allows express to use X-Forwarded-For header for client IP
+  app.set('trust proxy', 1);
+
   // Middleware
   app.use(helmet());
   app.use(cors({
@@ -49,7 +53,7 @@ export function createApp(): { app: Application; httpServer: HTTPServer; io: Soc
   // API routes with rate limiting
   app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/problems', problemRoutes);
-  app.use('/api/competitions', competitionRoutes);
+  app.use('/api/competitions', competitionLimiter, competitionRoutes);
   app.use('/api/teacher-applications', teacherApplicationRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/notifications', notificationRoutes);
