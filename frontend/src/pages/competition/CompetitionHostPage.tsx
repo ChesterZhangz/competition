@@ -385,15 +385,16 @@ export function CompetitionHostPage() {
       });
 
       socket.on('team:member-joined', () => {
-        // Refresh teams
-        if (competition?.settings.teamSettings?.enabled) {
-          competitionApi.getTeams(id).then((teams) => setTeams(teams as unknown as Team[]));
+        // Always refresh teams when member joins (let API handle the logic)
+        if (id) {
+          competitionApi.getTeams(id).then((teams) => setTeams(teams as unknown as Team[])).catch(() => {});
         }
       });
 
       socket.on('team:member-left', () => {
-        if (competition?.settings.teamSettings?.enabled) {
-          competitionApi.getTeams(id).then((teams) => setTeams(teams as unknown as Team[]));
+        // Always refresh teams when member leaves
+        if (id) {
+          competitionApi.getTeams(id).then((teams) => setTeams(teams as unknown as Team[])).catch(() => {});
         }
       });
         }
@@ -412,7 +413,9 @@ export function CompetitionHostPage() {
         socketRef.current = null;
       }
     };
-  }, [id, fetchData, competition?.settings.teamSettings?.enabled]);
+    // Note: Only depend on id and fetchData, NOT on competition state
+    // to prevent socket reconnection when competition data updates
+  }, [id, fetchData]);
 
   // Socket event handlers
   const handleStart = () => {
