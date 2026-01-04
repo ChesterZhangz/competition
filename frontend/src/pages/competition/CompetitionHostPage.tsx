@@ -281,44 +281,58 @@ export function CompetitionHostPage() {
       });
 
       // Timer events - backend sends milliseconds, convert to seconds for display
-      socket.on('timer:tick', (data: { remainingTime: number }) => {
-        setTimerState((prev) => ({
-          ...prev,
-          remainingTime: Math.ceil(data.remainingTime / 1000),
-          isRunning: true,
-        }));
+      socket.on('timer:tick', (data?: { remainingTime?: number }) => {
+        if (data?.remainingTime !== undefined) {
+          setTimerState((prev) => ({
+            ...prev,
+            remainingTime: Math.ceil(data.remainingTime! / 1000),
+            isRunning: true,
+          }));
+        }
       });
 
-      socket.on('timer:started', (data: { totalDuration: number; remainingTime: number }) => {
-        setTimerState({
-          totalDuration: Math.ceil(data.totalDuration / 1000),
-          remainingTime: Math.ceil(data.remainingTime / 1000),
-          isRunning: true,
-        });
+      socket.on('timer:started', (data?: { totalDuration?: number; remainingTime?: number }) => {
+        if (data?.remainingTime !== undefined && data?.totalDuration !== undefined) {
+          setTimerState({
+            totalDuration: Math.ceil(data.totalDuration / 1000),
+            remainingTime: Math.ceil(data.remainingTime / 1000),
+            isRunning: true,
+          });
+        }
       });
 
-      socket.on('timer:paused', (data: { remainingTime: number }) => {
-        setTimerState((prev) => ({
-          ...prev,
-          remainingTime: Math.ceil(data.remainingTime / 1000),
-          isRunning: false,
-        }));
+      socket.on('timer:paused', (data?: { remainingTime?: number }) => {
+        if (data?.remainingTime !== undefined) {
+          setTimerState((prev) => ({
+            ...prev,
+            remainingTime: Math.ceil(data.remainingTime! / 1000),
+            isRunning: false,
+          }));
+        } else {
+          setTimerState((prev) => ({ ...prev, isRunning: false }));
+        }
       });
 
-      socket.on('timer:resumed', (data: { remainingTime: number }) => {
-        setTimerState((prev) => ({
-          ...prev,
-          remainingTime: Math.ceil(data.remainingTime / 1000),
-          isRunning: true,
-        }));
+      socket.on('timer:resumed', (data?: { remainingTime?: number }) => {
+        if (data?.remainingTime !== undefined) {
+          setTimerState((prev) => ({
+            ...prev,
+            remainingTime: Math.ceil(data.remainingTime! / 1000),
+            isRunning: true,
+          }));
+        } else {
+          setTimerState((prev) => ({ ...prev, isRunning: true }));
+        }
       });
 
-      socket.on('timer:reset', (data: { totalDuration: number; remainingTime: number }) => {
-        setTimerState({
-          totalDuration: Math.ceil(data.totalDuration / 1000),
-          remainingTime: Math.ceil(data.remainingTime / 1000),
-          isRunning: false,
-        });
+      socket.on('timer:reset', (data?: { totalDuration?: number; remainingTime?: number }) => {
+        if (data?.remainingTime !== undefined && data?.totalDuration !== undefined) {
+          setTimerState({
+            totalDuration: Math.ceil(data.totalDuration / 1000),
+            remainingTime: Math.ceil(data.remainingTime / 1000),
+            isRunning: false,
+          });
+        }
       });
 
       socket.on('timer:ended', () => {
@@ -412,8 +426,9 @@ export function CompetitionHostPage() {
     socketRef.current?.emit('leaderboard:show', { competitionId: id });
   };
 
-  const handleTimerStart = (duration: number) => {
-    socketRef.current?.emit('timer:start', { competitionId: id, duration });
+  const handleTimerStart = (durationSeconds: number) => {
+    // Convert seconds to milliseconds for backend
+    socketRef.current?.emit('timer:start', { competitionId: id, duration: durationSeconds * 1000 });
   };
 
   const handleTimerPause = () => {

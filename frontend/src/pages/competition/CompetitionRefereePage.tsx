@@ -208,24 +208,36 @@ export function CompetitionRefereePage() {
     }));
 
     // Timer events - backend sends milliseconds, convert to seconds for display
-    cleanups.push(onSocketEvent('timer:tick', (data: { remainingTime: number }) => {
-      setTimerState(prev => ({ ...prev, remainingTime: Math.ceil(data.remainingTime / 1000), isRunning: true }));
+    cleanups.push(onSocketEvent('timer:tick', (data?: { remainingTime?: number }) => {
+      if (data?.remainingTime !== undefined) {
+        setTimerState(prev => ({ ...prev, remainingTime: Math.ceil(data.remainingTime! / 1000), isRunning: true }));
+      }
     }));
 
-    cleanups.push(onSocketEvent('timer:started', (data: { totalDuration: number; remainingTime: number }) => {
-      setTimerState({
-        totalDuration: Math.ceil(data.totalDuration / 1000),
-        remainingTime: Math.ceil(data.remainingTime / 1000),
-        isRunning: true,
-      });
+    cleanups.push(onSocketEvent('timer:started', (data?: { totalDuration?: number; remainingTime?: number }) => {
+      if (data?.totalDuration !== undefined && data?.remainingTime !== undefined) {
+        setTimerState({
+          totalDuration: Math.ceil(data.totalDuration / 1000),
+          remainingTime: Math.ceil(data.remainingTime / 1000),
+          isRunning: true,
+        });
+      }
     }));
 
-    cleanups.push(onSocketEvent('timer:paused', (data: { remainingTime: number }) => {
-      setTimerState(prev => ({ ...prev, remainingTime: Math.ceil(data.remainingTime / 1000), isRunning: false }));
+    cleanups.push(onSocketEvent('timer:paused', (data?: { remainingTime?: number }) => {
+      if (data?.remainingTime !== undefined) {
+        setTimerState(prev => ({ ...prev, remainingTime: Math.ceil(data.remainingTime! / 1000), isRunning: false }));
+      } else {
+        setTimerState(prev => ({ ...prev, isRunning: false }));
+      }
     }));
 
-    cleanups.push(onSocketEvent('timer:resumed', (data: { remainingTime: number }) => {
-      setTimerState(prev => ({ ...prev, remainingTime: Math.ceil(data.remainingTime / 1000), isRunning: true }));
+    cleanups.push(onSocketEvent('timer:resumed', (data?: { remainingTime?: number }) => {
+      if (data?.remainingTime !== undefined) {
+        setTimerState(prev => ({ ...prev, remainingTime: Math.ceil(data.remainingTime! / 1000), isRunning: true }));
+      } else {
+        setTimerState(prev => ({ ...prev, isRunning: true }));
+      }
     }));
 
     cleanups.push(onSocketEvent('timer:ended', () => {

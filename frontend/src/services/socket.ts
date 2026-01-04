@@ -370,9 +370,11 @@ function setupCommonEventListeners(socketInstance: Socket): void {
     }
   });
 
-  socketInstance.on('timer:tick', (data: TimerTickData) => {
-    // Convert milliseconds to seconds
-    store().setTimeRemaining(Math.ceil(data.remainingTime / 1000));
+  socketInstance.on('timer:tick', (data?: TimerTickData) => {
+    // Convert milliseconds to seconds (with null check)
+    if (data?.remainingTime !== undefined) {
+      store().setTimeRemaining(Math.ceil(data.remainingTime / 1000));
+    }
   });
 
   socketInstance.on('timer:paused', (data: TimerEventData) => {
@@ -982,8 +984,13 @@ export function showLeaderboard(competitionId: string): void {
 
 // ===== TIMER CONTROL (Host only) =====
 
-export function startTimer(competitionId: string, duration: number): void {
-  socket?.emit('timer:start', { competitionId, duration });
+/**
+ * Start timer with duration in seconds
+ * @param competitionId - Competition ID
+ * @param durationSeconds - Duration in seconds (will be converted to milliseconds for backend)
+ */
+export function startTimer(competitionId: string, durationSeconds: number): void {
+  socket?.emit('timer:start', { competitionId, duration: durationSeconds * 1000 });
 }
 
 export function pauseTimer(competitionId: string): void {
