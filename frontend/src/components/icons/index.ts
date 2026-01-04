@@ -22,3 +22,13 @@ export { IconMoon } from './theme/IconMoon';
 
 // Feedback
 export { IconLoading } from './feedback/IconLoading';
+
+// Notification
+export { IconBell } from './notification/IconBell';
+export { IconCheckCircle } from './notification/IconCheckCircle';
+export { IconClipboard } from './notification/IconClipboard';
+export { IconFlag } from './notification/IconFlag';
+export { IconMegaphone } from './notification/IconMegaphone';
+export { IconRocket } from './notification/IconRocket';
+export { IconUserPlus } from './notification/IconUserPlus';
+export { IconXCircle } from './notification/IconXCircle';

@@ -1,9 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { GlassCard } from '@/components/ui/glass-card';
 import { Button } from '@/components/ui/button';
 import { IconLoading } from '@/components/icons/feedback/IconLoading';
+import { IconBell } from '@/components/icons/notification/IconBell';
+import { IconClipboard } from '@/components/icons/notification/IconClipboard';
+import { IconCheckCircle } from '@/components/icons/notification/IconCheckCircle';
+import { IconXCircle } from '@/components/icons/notification/IconXCircle';
+import { IconUserPlus } from '@/components/icons/notification/IconUserPlus';
+import { IconRocket } from '@/components/icons/notification/IconRocket';
+import { IconFlag } from '@/components/icons/notification/IconFlag';
+import { IconMegaphone } from '@/components/icons/notification/IconMegaphone';
+import { IconTrophy } from '@/components/icons/competition/IconTrophy';
 import { useNotificationStore } from '@/store/notificationStore';
 import type { Notification } from '@/services/notification.api';
 
@@ -44,26 +53,28 @@ export function NotificationsPage() {
     await deleteNotification(id);
   };
 
-  const getNotificationIcon = (type: string) => {
+  const getNotificationIcon = (type: string): ReactNode => {
+    const iconProps = { size: 24, className: 'text-[var(--color-primary)]' };
+
     switch (type) {
       case 'teacher_application_submitted':
-        return '📋';
+        return <IconClipboard {...iconProps} />;
       case 'teacher_application_approved':
-        return '✅';
+        return <IconCheckCircle {...iconProps} className="text-green-500" />;
       case 'teacher_application_rejected':
-        return '❌';
+        return <IconXCircle {...iconProps} className="text-red-500" />;
       case 'competition_participant_joined':
-        return '👋';
+        return <IconUserPlus {...iconProps} />;
       case 'competition_started':
-        return '🚀';
+        return <IconRocket {...iconProps} />;
       case 'competition_ended':
-        return '🏁';
+        return <IconFlag {...iconProps} />;
       case 'competition_result':
-        return '🏆';
+        return <IconTrophy {...iconProps} className="text-yellow-500" />;
       case 'system':
-        return '📢';
+        return <IconMegaphone {...iconProps} />;
       default:
-        return '🔔';
+        return <IconBell {...iconProps} />;
     }
   };
 
@@ -145,7 +156,9 @@ export function NotificationsPage() {
         </div>
       ) : notifications.length === 0 ? (
         <GlassCard className="p-12 text-center">
-          <div className="text-5xl mb-4 opacity-50">🔔</div>
+          <div className="mb-4 flex justify-center opacity-50">
+            <IconBell size={64} className="text-[var(--color-muted)]" />
+          </div>
           <p className="text-[var(--color-muted)]">
             {filter === 'unread'
               ? t('notification.noUnread', 'No unread notifications')
@@ -163,9 +176,9 @@ export function NotificationsPage() {
               onClick={() => handleNotificationClick(notification)}
             >
               <div className="flex gap-4">
-                <span className="text-2xl flex-shrink-0">
+                <div className="flex-shrink-0">
                   {getNotificationIcon(notification.type)}
-                </span>
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">

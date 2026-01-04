@@ -1,8 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useNotificationStore } from '@/store/notificationStore';
 import { useAuthStore } from '@/store/authStore';
+import { IconBell } from '@/components/icons/notification/IconBell';
+import { IconClipboard } from '@/components/icons/notification/IconClipboard';
+import { IconCheckCircle } from '@/components/icons/notification/IconCheckCircle';
+import { IconXCircle } from '@/components/icons/notification/IconXCircle';
+import { IconUserPlus } from '@/components/icons/notification/IconUserPlus';
+import { IconRocket } from '@/components/icons/notification/IconRocket';
+import { IconFlag } from '@/components/icons/notification/IconFlag';
+import { IconMegaphone } from '@/components/icons/notification/IconMegaphone';
+import { IconTrophy } from '@/components/icons/competition/IconTrophy';
 
 export function NotificationDropdown() {
   const { t } = useTranslation();
@@ -62,26 +71,28 @@ export function NotificationDropdown() {
     await markAllAsRead();
   };
 
-  const getNotificationIcon = (type: string) => {
+  const getNotificationIcon = (type: string): ReactNode => {
+    const iconProps = { size: 20, className: 'text-[var(--color-primary)]' };
+
     switch (type) {
       case 'teacher_application_submitted':
-        return '📋';
+        return <IconClipboard {...iconProps} />;
       case 'teacher_application_approved':
-        return '✅';
+        return <IconCheckCircle {...iconProps} className="text-green-500" />;
       case 'teacher_application_rejected':
-        return '❌';
+        return <IconXCircle {...iconProps} className="text-red-500" />;
       case 'competition_participant_joined':
-        return '👋';
+        return <IconUserPlus {...iconProps} />;
       case 'competition_started':
-        return '🚀';
+        return <IconRocket {...iconProps} />;
       case 'competition_ended':
-        return '🏁';
+        return <IconFlag {...iconProps} />;
       case 'competition_result':
-        return '🏆';
+        return <IconTrophy {...iconProps} className="text-yellow-500" />;
       case 'system':
-        return '📢';
+        return <IconMegaphone {...iconProps} />;
       default:
-        return '🔔';
+        return <IconBell {...iconProps} />;
     }
   };
 
@@ -110,14 +121,7 @@ export function NotificationDropdown() {
         className="relative rounded-lg p-2 hover:bg-[var(--color-secondary)] transition-colors"
         aria-label={t('notification.notifications', 'Notifications')}
       >
-        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-          />
-        </svg>
+        <IconBell size={20} />
         {/* Badge */}
         {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-error)] text-xs font-bold text-white">
@@ -150,14 +154,9 @@ export function NotificationDropdown() {
               </div>
             ) : notifications.length === 0 ? (
               <div className="py-12 text-center text-[var(--color-muted)]">
-                <svg className="mx-auto h-12 w-12 mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-                  />
-                </svg>
+                <div className="mx-auto mb-3 flex justify-center opacity-50">
+                  <IconBell size={48} />
+                </div>
                 <p>{t('notification.empty', 'No notifications yet')}</p>
               </div>
             ) : (
@@ -170,9 +169,9 @@ export function NotificationDropdown() {
                   }`}
                 >
                   <div className="flex gap-3">
-                    <span className="text-xl flex-shrink-0">
+                    <div className="flex-shrink-0">
                       {getNotificationIcon(notification.type)}
-                    </span>
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <p className={`text-sm font-medium truncate ${!notification.read ? 'text-[var(--color-foreground)]' : 'text-[var(--color-muted)]'}`}>
