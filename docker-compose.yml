@@ -43,6 +43,16 @@ services:
     networks:
       - app-network
 
+  # Calendar Frontend (schedule.mareate.com)
+  calender:
+    build:
+      context: ./calender
+      dockerfile: Dockerfile
+    container_name: calender-frontend
+    restart: unless-stopped
+    networks:
+      - app-network
+
   # Nginx Reverse Proxy + SSL
   nginx:
     image: nginx:alpine
@@ -58,6 +68,7 @@ services:
     depends_on:
       - backend
       - frontend
+      - calender
     restart: unless-stopped
     networks:
       - app-network
