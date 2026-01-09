@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 REPO_URL="https://github.com/ChesterZhangz/competition.git"
 DEPLOY_DIR="/opt/competition"
 DOMAINS=("www.mareate.com" "schedule.mareate.com")
-EMAIL="${CERT_EMAIL:-admin@mareate.com}"  # 可通过环境变量覆盖
+EMAIL="${CERT_EMAIL:-1010152@qq.com}"  # 可通过环境变量覆盖
 
 echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}   Competition + Calender 首次安装${NC}"
