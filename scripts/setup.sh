@@ -15,7 +15,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 配置
-REPO_URL="git@github.com:ChesterZhangz/competition.git"
+REPO_URL="https://github.com/ChesterZhangz/competition.git"
 DEPLOY_DIR="/opt/competition"
 DOMAINS=("www.mareate.com" "schedule.mareate.com")
 EMAIL="${CERT_EMAIL:-admin@mareate.com}"  # 可通过环境变量覆盖
